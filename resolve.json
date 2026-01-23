@@ -1,0 +1,41 @@
+[
+    {
+        "name": "platform",
+        "resolver": "git",
+        "method": "semver",
+        "major": 6,
+        "source": "github.com/steinwurf/platform.git"
+    },
+    {
+        "name": "verify",
+        "resolver": "git",
+        "method": "semver",
+        "major": 6,
+        "source": "github.com/steinwurf/verify.git"
+    },
+    {
+        "name": "expected",
+        "resolver": "git",
+        "method": "semver",
+        "major": 2,
+        "source": "github.com/steinwurf/expected.git"
+    },
+    {
+        "name": "gtest",
+        "resolver": "git",
+        "internal": true,
+        "method": "semver",
+        "major": 6,
+        "source": "github.com/steinwurf/gtest.git"
+    },
+    {
+        "name": "toolchains",
+        "internal": true,
+        "resolver": "git",
+        "method": "semver",
+        "major": 1,
+        "sources": [
+            "github.com/steinwurf/cmake-toolchains.git"
+        ]
+    }
+]

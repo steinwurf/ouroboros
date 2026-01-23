@@ -1,0 +1,56 @@
+{
+    "expected": {
+        "commit_id": "e84368a61a223dd0fb3ad60d6e6791a3ffc199f7",
+        "resolver_info": "2.0.0",
+        "sha1": "2760f759e9baeaace1f61449d61c8197d1ffb77d",
+        "source": "github.com/steinwurf/expected.git"
+    },
+    "expected-source": {
+        "commit_id": "292eff8bd8ee230a7df1d6a1c00c4ea0eb2f0362",
+        "resolver_info": "v1.1.0",
+        "sha1": "5078750ed20c6d6323d27ed96fb2ddebc43bb247",
+        "source": "github.com/TartanLlama/expected.git"
+    },
+    "gtest": {
+        "commit_id": "8e1f80ae8618fdba4389f1b56c811ea7241569d1",
+        "resolver_info": "6.0.2",
+        "sha1": "44c35f8798a738692c902fe2b67dc0cb76a1df53",
+        "source": "github.com/steinwurf/gtest.git"
+    },
+    "gtest-source": {
+        "commit_id": "52eb8108c5bdec04579160ae17225d66034bd723",
+        "resolver_info": "v1.17.0",
+        "sha1": "8600eafa3daedc694d3115677da0dda3af6a8633",
+        "source": "github.com/google/googletest.git"
+    },
+    "libassert-source": {
+        "commit_id": "60667829264ae01241257df7f1c7d6dba668eb9d",
+        "resolver_info": "v2.1.5",
+        "sha1": "650d881b8cb6cc1adf354d47d6353db6ec4fd6a5",
+        "source": "github.com:jeremy-rifkin/libassert.git"
+    },
+    "platform": {
+        "commit_id": "9dacaa6bba5ff933d126620c073ddfe09e993336",
+        "resolver_info": "6.1.0",
+        "sha1": "7a014ba5a95cf7f0193213e95d3d2d8fcfa313b7",
+        "source": "github.com/steinwurf/platform.git"
+    },
+    "toolchains": {
+        "commit_id": "c46ef9216ae35a8dc185e09adbda55fab950384e",
+        "resolver_info": "1.0.6",
+        "sha1": "443cb23b0570dffd39283d8679ec393ed809302f",
+        "source": "github.com/steinwurf/cmake-toolchains.git"
+    },
+    "verify": {
+        "commit_id": "27b970938379a5a1bc1c9f4377c2686943763893",
+        "resolver_info": "6.0.4",
+        "sha1": "fed379602b6ea7bd611fc249daffa11b9e593800",
+        "source": "github.com/steinwurf/verify.git"
+    },
+    "zlib-source": {
+        "commit_id": "51b7f2abdade71cd9bb0e7a373ef2610ec6f9daf",
+        "resolver_info": "51b7f2abdade71cd9bb0e7a373ef2610ec6f9daf",
+        "sha1": "33283130debb8bf95a98929ff6cadd5bd9cb6a92",
+        "source": "github.com/madler/zlib.git"
+    }
+}
