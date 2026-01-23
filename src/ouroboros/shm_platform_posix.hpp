@@ -7,11 +7,6 @@
 
 #pragma once
 
-// Feature test macro required for shm_open/shm_unlink on older compilers
-#ifndef _POSIX_C_SOURCE
-#define _POSIX_C_SOURCE 200112L
-#endif
-
 #include <fcntl.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
