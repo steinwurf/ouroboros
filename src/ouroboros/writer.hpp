@@ -16,15 +16,18 @@
 #include <string_view>
 #include <vector>
 
-#include "buffer_format.hpp"
-#include "portable_atomic.hpp"
-#include "span.hpp"
+#include "detail/buffer_format.hpp"
+#include "detail/portable_atomic.hpp"
+#include "detail/span.hpp"
 #include "version.hpp"
 
 namespace ouroboros
 {
 inline namespace STEINWURF_OUROBOROS_VERSION
 {
+
+using detail::buffer_format;
+using detail::portable_atomic;
 
 /// A log writer that manages a circular buffer of variable-sized chunks.
 ///

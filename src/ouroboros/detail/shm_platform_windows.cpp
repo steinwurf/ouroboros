@@ -29,12 +29,14 @@
 #include <cstdint>
 #include <string>
 
-#include "error_code.hpp"
+#include "../error_code.hpp"
 #include "shm_platform_windows.hpp"
 
 namespace ouroboros
 {
 inline namespace STEINWURF_OUROBOROS_VERSION
+{
+namespace detail
 {
 
 bool shm_handle::is_valid() const
@@ -141,7 +143,9 @@ void unlink_shm(const std::string& name)
     (void)name; // Unused on Windows
 }
 
+} // namespace detail
 }
 }
 
 #endif // PLATFORM_WINDOWS
+

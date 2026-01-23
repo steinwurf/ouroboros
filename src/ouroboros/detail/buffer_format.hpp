@@ -11,11 +11,13 @@
 #include <verify/verify.hpp>
 
 #include "span.hpp"
-#include "version.hpp"
+#include "../version.hpp"
 
 namespace ouroboros
 {
 inline namespace STEINWURF_OUROBOROS_VERSION
+{
+namespace detail
 {
 
 /// Common buffer format constants and structures shared between reader and
@@ -162,6 +164,8 @@ inline T set_commit(T v) noexcept
     constexpr T msb_mask = static_cast<T>(1) << (sizeof(T) * 8 - 1);
     return (v | msb_mask);
 }
+} // namespace buffer_format
+} // namespace detail
 }
 }
-}
+

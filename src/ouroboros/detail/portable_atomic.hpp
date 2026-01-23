@@ -12,11 +12,13 @@
 
 #include <platform/config.hpp>
 
-#include "version.hpp"
+#include "../version.hpp"
 
 namespace ouroboros
 {
 inline namespace STEINWURF_OUROBOROS_VERSION
+{
+namespace detail
 {
 namespace portable_atomic
 {
@@ -166,6 +168,8 @@ inline void store_release(T* p, T v) noexcept
 
 #endif
 
+} // namespace portable_atomic
+} // namespace detail
 }
 }
-}
+

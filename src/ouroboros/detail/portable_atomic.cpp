@@ -28,6 +28,8 @@ namespace ouroboros
 {
 inline namespace STEINWURF_OUROBOROS_VERSION
 {
+namespace detail
+{
 namespace portable_atomic
 {
 namespace detail
@@ -62,7 +64,9 @@ void store_relaxed_impl_u64(std::uint64_t* p, std::uint64_t v) noexcept
 
 } // namespace detail
 } // namespace portable_atomic
+} // namespace detail
 } // namespace STEINWURF_OUROBOROS_VERSION
 } // namespace ouroboros
 
 #endif // PLATFORM_WINDOWS_64
+

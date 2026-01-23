@@ -15,7 +15,7 @@
 #include <string>
 #include <string_view>
 
-#include "buffer_format.hpp"
+#include "detail/buffer_format.hpp"
 #include "shm_platform.hpp"
 #include "version.hpp"
 #include "writer.hpp"
@@ -24,6 +24,8 @@ namespace ouroboros
 {
 inline namespace STEINWURF_OUROBOROS_VERSION
 {
+
+using detail::buffer_format;
 
 /// A shared memory log writer that wraps the writer with shared memory
 /// management.

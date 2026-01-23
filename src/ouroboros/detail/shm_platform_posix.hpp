@@ -18,11 +18,13 @@
 #include <cstdint>
 #include <string>
 
-#include "error_code.hpp"
+#include "../error_code.hpp"
 
 namespace ouroboros
 {
 inline namespace STEINWURF_OUROBOROS_VERSION
+{
+namespace detail
 {
 
 /// Platform-specific shared memory handle for POSIX systems
@@ -158,5 +160,7 @@ inline void unlink_shm(const std::string& name)
     shm_unlink(name.c_str());
 }
 
+} // namespace detail
 }
 }
+

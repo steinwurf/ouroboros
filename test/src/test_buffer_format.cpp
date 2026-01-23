@@ -7,11 +7,11 @@
 
 #include <gtest/gtest.h>
 
-#include <ouroboros/buffer_format.hpp>
+#include <ouroboros/detail/buffer_format.hpp>
 
 TEST(test_buffer_format, align_up)
 {
-    using namespace ouroboros::buffer_format;
+    using namespace ouroboros::detail::buffer_format;
 
     EXPECT_EQ(align_up(0, 4), 0U);
     EXPECT_EQ(align_up(1, 4), 4U);
@@ -36,12 +36,12 @@ TEST(test_buffer_format, magic_value)
 {
     // Verify the magic value represents "OUROBLOG"
     // O=0x4F, U=0x55, R=0x52, O=0x4F, B=0x42, L=0x4C, O=0x4F, G=0x47
-    EXPECT_EQ(ouroboros::buffer_format::magic, 0x4F55524F424C4F47ULL);
+    EXPECT_EQ(ouroboros::detail::buffer_format::magic, 0x4F55524F424C4F47ULL);
 }
 
 TEST(test_buffer_format, commit_flag)
 {
-    using namespace ouroboros::buffer_format;
+    using namespace ouroboros::detail::buffer_format;
 
     uint32_t value = 0x12345678;
     uint32_t committed_value = set_commit(value);
@@ -56,7 +56,7 @@ TEST(test_buffer_format, commit_flag)
 
 TEST(test_buffer_format, commit_flag_min)
 {
-    using namespace ouroboros::buffer_format;
+    using namespace ouroboros::detail::buffer_format;
     uint32_t value_min = 0; // Min value without commit flag
     uint32_t committed_value_min = set_commit(value_min);
     EXPECT_TRUE(is_committed(committed_value_min));
@@ -68,7 +68,7 @@ TEST(test_buffer_format, commit_flag_min)
 
 TEST(test_buffer_format, commit_flag_max)
 {
-    using namespace ouroboros::buffer_format;
+    using namespace ouroboros::detail::buffer_format;
     uint32_t value_max = clear_commit(std::numeric_limits<uint32_t>::max());
     EXPECT_FALSE(is_committed(value_max));
     uint32_t committed_value_max = set_commit(value_max);
@@ -84,7 +84,7 @@ TEST(test_buffer_format, commit_flag_max)
 
 TEST(test_buffer_format, commit_flag_double_set)
 {
-    using namespace ouroboros::buffer_format;
+    using namespace ouroboros::detail::buffer_format;
     EXPECT_DEATH(
         { set_commit(set_commit<uint32_t>(0x12345678)); },
         "Assertion failed at buffer_format.hpp");

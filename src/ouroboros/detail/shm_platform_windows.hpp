@@ -16,11 +16,13 @@
 #include <cstdint>
 #include <string>
 
-#include "error_code.hpp"
+#include "../error_code.hpp"
 
 namespace ouroboros
 {
 inline namespace STEINWURF_OUROBOROS_VERSION
+{
+namespace detail
 {
 
 /// Platform-specific shared memory handle for Windows
@@ -62,5 +64,7 @@ void unmap_shm(const shm_handle& handle, void* ptr, std::size_t size);
 /// This is a no-op here as unlinking is handled by closing the handle
 void unlink_shm(const std::string& name);
 
+} // namespace detail
 }
 }
+

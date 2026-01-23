@@ -17,16 +17,19 @@
 #include <string_view>
 #include <vector>
 
-#include "buffer_format.hpp"
+#include "detail/buffer_format.hpp"
 #include "error_code.hpp"
-#include "portable_atomic.hpp"
-#include "span.hpp"
+#include "detail/portable_atomic.hpp"
+#include "detail/span.hpp"
 #include "version.hpp"
 
 namespace ouroboros
 {
 inline namespace STEINWURF_OUROBOROS_VERSION
 {
+
+using detail::buffer_format;
+using detail::portable_atomic;
 
 /// A log reader that safely reads from a circular buffer managed by a writer.
 ///
