@@ -45,7 +45,8 @@ auto create_and_map_shm(const std::string& name, std::size_t size)
 /// @param name Name of the shared memory segment
 /// @return A tuple of (handle, mapped pointer, size) or an error
 auto open_and_map_shm(const std::string& name)
-    -> tl::expected<std::tuple<shm_handle, void*, std::size_t>, std::error_code>;
+    -> tl::expected<std::tuple<shm_handle, void*, std::size_t>,
+                    std::error_code>;
 
 /// Unmap shared memory (Windows implementation)
 ///

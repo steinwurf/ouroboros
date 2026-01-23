@@ -237,7 +237,8 @@ TEST(test_log, reader_empty_buffer_handling)
     // Try to read from empty buffer - should fail
     auto entry_result = reader.read_next_entry();
     ASSERT_FALSE(entry_result.has_value());
-    EXPECT_EQ(entry_result.error(), ouroboros::make_error_code(ouroboros::error::no_data_available));
+    EXPECT_EQ(entry_result.error(),
+              ouroboros::make_error_code(ouroboros::error::no_data_available));
 }
 
 TEST(test_log, reader_configure_invalid_magic)
@@ -707,7 +708,8 @@ TEST(test_log, reader_writer_interleaved_operations)
     // Reader tries to read again - should fail
     auto entry4 = reader.read_next_entry();
     ASSERT_FALSE(entry4.has_value());
-    EXPECT_EQ(entry4.error(), ouroboros::make_error_code(ouroboros::error::no_data_available));
+    EXPECT_EQ(entry4.error(),
+              ouroboros::make_error_code(ouroboros::error::no_data_available));
 }
 
 TEST(test_log, reader_handles_rapid_writes)

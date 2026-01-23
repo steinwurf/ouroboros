@@ -51,23 +51,23 @@ auto create_and_map_shm(const std::string& name, std::size_t size)
                            static_cast<DWORD>(size), name.c_str());
     if (hMap == nullptr)
     {
-        return tl::make_unexpected(make_error_code(
-            ouroboros::error::shared_memory_create_failed));
+        return tl::make_unexpected(
+            make_error_code(ouroboros::error::shared_memory_create_failed));
     }
 
     if (GetLastError() == ERROR_ALREADY_EXISTS)
     {
         CloseHandle(hMap);
-        return tl::make_unexpected(make_error_code(
-            ouroboros::error::shared_memory_exists));
+        return tl::make_unexpected(
+            make_error_code(ouroboros::error::shared_memory_exists));
     }
 
     void* ptr = MapViewOfFile(hMap, FILE_MAP_ALL_ACCESS, 0, 0, size);
     if (ptr == nullptr)
     {
         CloseHandle(hMap);
-        return tl::make_unexpected(make_error_code(
-            ouroboros::error::shared_memory_map_failed));
+        return tl::make_unexpected(
+            make_error_code(ouroboros::error::shared_memory_map_failed));
     }
 
     VERIFY(reinterpret_cast<uintptr_t>(ptr) % 8 == 0,
@@ -87,11 +87,11 @@ auto open_and_map_shm(const std::string& name)
     {
         if (GetLastError() == ERROR_FILE_NOT_FOUND)
         {
-            return tl::make_unexpected(make_error_code(
-                ouroboros::error::shared_memory_not_found));
+            return tl::make_unexpected(
+                make_error_code(ouroboros::error::shared_memory_not_found));
         }
-        return tl::make_unexpected(make_error_code(
-            ouroboros::error::shared_memory_open_failed));
+        return tl::make_unexpected(
+            make_error_code(ouroboros::error::shared_memory_open_failed));
     }
 
     // Map the view first (size 0 maps the entire object)
@@ -99,8 +99,8 @@ auto open_and_map_shm(const std::string& name)
     if (ptr == nullptr)
     {
         CloseHandle(hMap);
-        return tl::make_unexpected(make_error_code(
-            ouroboros::error::shared_memory_map_failed));
+        return tl::make_unexpected(
+            make_error_code(ouroboros::error::shared_memory_map_failed));
     }
 
     // Query the mapped memory to get the size
@@ -109,8 +109,8 @@ auto open_and_map_shm(const std::string& name)
     {
         UnmapViewOfFile(ptr);
         CloseHandle(hMap);
-        return tl::make_unexpected(make_error_code(
-            ouroboros::error::shared_memory_stat_failed));
+        return tl::make_unexpected(
+            make_error_code(ouroboros::error::shared_memory_stat_failed));
     }
 
     const std::size_t size = static_cast<std::size_t>(mbi.RegionSize);

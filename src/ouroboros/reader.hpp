@@ -13,15 +13,15 @@
 #include <cassert>
 #include <cstdint>
 #include <cstring>
+#include <optional>
 #include <string_view>
 #include <vector>
-#include <optional>
 
-#include "error_code.hpp"
-#include "version.hpp"
 #include "buffer_format.hpp"
+#include "error_code.hpp"
 #include "portable_atomic.hpp"
 #include "span.hpp"
+#include "version.hpp"
 
 namespace ouroboros
 {
@@ -100,8 +100,8 @@ public:
 
         if (!is_ready(buffer))
         {
-            return tl::make_unexpected(make_error_code(
-                ouroboros::error::invalid_magic));
+            return tl::make_unexpected(
+                make_error_code(ouroboros::error::invalid_magic));
         }
 
         const uint32_t version = read_value<uint32_t>(buffer.data() + 8);
@@ -124,8 +124,8 @@ public:
             buffer_format::compute_buffer_header_size(chunk_count);
         if (buffer.size() < min_buffer_size)
         {
-            return tl::make_unexpected(make_error_code(
-                ouroboros::error::buffer_too_small));
+            return tl::make_unexpected(
+                make_error_code(ouroboros::error::buffer_too_small));
         }
 
         const auto start = find_starting_chunk(buffer, chunk_count, strategy);

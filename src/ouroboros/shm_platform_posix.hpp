@@ -53,8 +53,8 @@ inline auto create_and_map_shm(const std::string& name, std::size_t size)
             return tl::make_unexpected(
                 make_error_code(ouroboros::error::shared_memory_exists));
         }
-        return tl::make_unexpected(make_error_code(
-            ouroboros::error::shared_memory_create_failed));
+        return tl::make_unexpected(
+            make_error_code(ouroboros::error::shared_memory_create_failed));
     }
 
     // Set the size of the shared memory object
@@ -62,8 +62,8 @@ inline auto create_and_map_shm(const std::string& name, std::size_t size)
     {
         close(fd);
         shm_unlink(name.c_str());
-        return tl::make_unexpected(make_error_code(
-            ouroboros::error::shared_memory_truncate_failed));
+        return tl::make_unexpected(
+            make_error_code(ouroboros::error::shared_memory_truncate_failed));
     }
 
     // Map the shared memory object
@@ -72,8 +72,8 @@ inline auto create_and_map_shm(const std::string& name, std::size_t size)
     {
         close(fd);
         shm_unlink(name.c_str());
-        return tl::make_unexpected(make_error_code(
-            ouroboros::error::shared_memory_map_failed));
+        return tl::make_unexpected(
+            make_error_code(ouroboros::error::shared_memory_map_failed));
     }
 
     // Verify alignment (buffer must be 8-byte aligned for writer)
@@ -102,8 +102,8 @@ inline auto open_and_map_shm(const std::string& name)
             return tl::make_unexpected(
                 make_error_code(ouroboros::error::shared_memory_not_found));
         }
-        return tl::make_unexpected(make_error_code(
-            ouroboros::error::shared_memory_open_failed));
+        return tl::make_unexpected(
+            make_error_code(ouroboros::error::shared_memory_open_failed));
     }
 
     // Get the size of the shared memory object
@@ -111,8 +111,8 @@ inline auto open_and_map_shm(const std::string& name)
     if (fstat(fd, &st) == -1)
     {
         close(fd);
-        return tl::make_unexpected(make_error_code(
-            ouroboros::error::shared_memory_stat_failed));
+        return tl::make_unexpected(
+            make_error_code(ouroboros::error::shared_memory_stat_failed));
     }
 
     const std::size_t size = static_cast<std::size_t>(st.st_size);
@@ -122,8 +122,8 @@ inline auto open_and_map_shm(const std::string& name)
     if (ptr == MAP_FAILED)
     {
         close(fd);
-        return tl::make_unexpected(make_error_code(
-            ouroboros::error::shared_memory_map_failed));
+        return tl::make_unexpected(
+            make_error_code(ouroboros::error::shared_memory_map_failed));
     }
 
     shm_handle handle;

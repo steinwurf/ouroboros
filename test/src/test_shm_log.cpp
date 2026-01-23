@@ -31,7 +31,8 @@ auto generate_shm_name() -> std::string
     auto c = counter.fetch_add(1, std::memory_order_relaxed);
     auto pid = static_cast<uint32_t>(::getpid());
 
-    // "/ouroboros_" (10) + pid (up to 10) + "_" (1) + counter (up to 10) = <= 31-ish
+    // "/ouroboros_" (10) + pid (up to 10) + "_" (1) + counter (up to 10) = <=
+    // 31-ish
     return "/ouroboros_" + std::to_string(pid) + "_" + std::to_string(c);
 }
 }
@@ -173,7 +174,8 @@ TEST(test_shm_log, reader_empty_buffer_handling)
     // Try to read from empty buffer - should fail
     auto entry_result = reader.read_next_entry();
     ASSERT_FALSE(entry_result.has_value());
-    EXPECT_EQ(entry_result.error(), ouroboros::make_error_code(ouroboros::error::no_data_available));
+    EXPECT_EQ(entry_result.error(),
+              ouroboros::make_error_code(ouroboros::error::no_data_available));
 }
 
 TEST(test_shm_log, multiple_readers)
@@ -267,7 +269,8 @@ TEST(test_shm_log, reader_writer_interleaved_operations)
     // Reader tries to read again - should fail
     auto entry4 = reader.read_next_entry();
     ASSERT_FALSE(entry4.has_value());
-    EXPECT_EQ(entry4.error(), ouroboros::make_error_code(ouroboros::error::no_data_available));
+    EXPECT_EQ(entry4.error(),
+              ouroboros::make_error_code(ouroboros::error::no_data_available));
 }
 
 TEST(test_shm_log, wrap_behavior)

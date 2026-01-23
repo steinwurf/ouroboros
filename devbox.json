@@ -1,0 +1,16 @@
+{
+  "$schema": "https://raw.githubusercontent.com/jetify-com/devbox/0.16.0/.schema/devbox.schema.json",
+  "packages": [
+    "clang_18@18.1.8"
+  ],
+  "shell": {
+    "init_hook": [
+      "echo 'Welcome to devbox!' > /dev/null"
+    ],
+    "scripts": {
+      "format": [
+        "find ./test ./src \\( -iname '*.c' -o -iname '*.h' -o -iname '*.cpp' -o -iname '*.hpp' \\) -print0 | xargs -0 clang-format -i"
+      ]
+    }
+  }
+}

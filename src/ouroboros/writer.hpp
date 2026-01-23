@@ -16,10 +16,10 @@
 #include <string_view>
 #include <vector>
 
-#include "version.hpp"
 #include "buffer_format.hpp"
 #include "portable_atomic.hpp"
 #include "span.hpp"
+#include "version.hpp"
 
 namespace ouroboros
 {

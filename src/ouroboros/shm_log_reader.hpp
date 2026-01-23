@@ -15,10 +15,10 @@
 #include <string>
 #include <string_view>
 
-#include "version.hpp"
 #include "buffer_format.hpp"
 #include "reader.hpp"
 #include "shm_platform.hpp"
+#include "version.hpp"
 
 namespace ouroboros
 {

@@ -10,8 +10,8 @@
 #include <cstdint>
 #include <verify/verify.hpp>
 
-#include "version.hpp"
 #include "span.hpp"
+#include "version.hpp"
 
 namespace ouroboros
 {
