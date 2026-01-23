@@ -70,6 +70,11 @@ target_link_libraries(ouroboros PRIVATE steinwurf::platform)
 target_link_libraries(ouroboros PRIVATE steinwurf::verify)
 target_link_libraries(ouroboros PRIVATE steinwurf::expected)
 
+# Link POSIX shared memory library (rt) on Linux for shm_open/shm_unlink
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+  target_link_libraries(ouroboros PUBLIC rt)
+endif()
+
 target_include_directories(ouroboros PUBLIC src)
 
 # Make sure we compile with C++17 and do not use compiler-specific extensions
