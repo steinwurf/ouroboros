@@ -15,7 +15,6 @@
 #include <string>
 #include <string_view>
 
-#include "detail/buffer_format.hpp"
 #include "shm_platform.hpp"
 #include "version.hpp"
 #include "writer.hpp"
@@ -24,9 +23,6 @@ namespace ouroboros
 {
 inline namespace STEINWURF_OUROBOROS_VERSION
 {
-
-using detail::buffer_format;
-
 /// A shared memory log writer that wraps the writer with shared memory
 /// management.
 ///
@@ -102,7 +98,8 @@ public:
 
         // Calculate required buffer size
         const std::size_t required_size =
-            buffer_format::compute_buffer_size(chunk_target_size, chunk_count);
+            detail::buffer_format::compute_buffer_size(chunk_target_size,
+                                                       chunk_count);
 
         // Create and map shared memory
         auto result = create_and_map_shm(shm_name, required_size);

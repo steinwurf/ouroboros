@@ -16,8 +16,8 @@
 #include <string_view>
 #include <vector>
 
+#include "detail/atomic.hpp"
 #include "detail/buffer_format.hpp"
-#include "detail/portable_atomic.hpp"
 #include "detail/span.hpp"
 #include "version.hpp"
 
@@ -25,10 +25,6 @@ namespace ouroboros
 {
 inline namespace STEINWURF_OUROBOROS_VERSION
 {
-
-using detail::buffer_format;
-using detail::portable_atomic;
-
 /// A log writer that manages a circular buffer of variable-sized chunks.
 ///
 /// The buffer is divided into a header followed by a table of chunks
@@ -147,9 +143,9 @@ public:
         VERIFY(buffer.size() > 0, "Buffer span must not be empty!");
         VERIFY(chunk_count > 0, "chunk_count must be greater than 0!");
         const auto chunk_table_size =
-            (chunk_count * buffer_format::chunk_row_size);
+            (chunk_count * detail::buffer_format::chunk_row_size);
         const auto chunks_size = chunk_count * chunk_target_size;
-        VERIFY(buffer.size() >= (buffer_format::buffer_header_size +
+        VERIFY(buffer.size() >= (detail::buffer_format::buffer_header_size +
                                  chunk_table_size + chunks_size),
                "Buffer span is too small for the given chunk_target_size and "
                "chunk_count");
@@ -162,19 +158,20 @@ public:
         m_total_entries_written = 0;
 
         // Zero initialize chunk table first
-        std::memset(m_buffer.data() + buffer_format::buffer_header_size, 0,
-                    chunk_table_size);
+        std::memset(m_buffer.data() + detail::buffer_format::buffer_header_size,
+                    0, chunk_table_size);
 
         // Write header (magic bytes written last to ensure fully initialized
         // buffer)
-        write_header(m_buffer.subspan(0, buffer_format::buffer_header_size),
-                     static_cast<uint32_t>(chunk_count));
+        write_header(
+            m_buffer.subspan(0, detail::buffer_format::buffer_header_size),
+            static_cast<uint32_t>(chunk_count));
 
         // Initialize first chunk
         m_current_chunk_index = 0;
-        m_offset = buffer_format::buffer_header_size + chunk_table_size;
-        m_offset =
-            buffer_format::align_up(m_offset, buffer_format::entry_alignment);
+        m_offset = detail::buffer_format::buffer_header_size + chunk_table_size;
+        m_offset = detail::buffer_format::align_up(
+            m_offset, detail::buffer_format::entry_alignment);
         initialize_chunk(chunk_row(m_current_chunk_index), m_offset,
                          m_total_entries_written);
         commit_chunk(m_current_chunk_index);
@@ -191,13 +188,13 @@ public:
 
         auto payload_size = entry.size();
         uint32_t total_entry_size =
-            buffer_format::entry_header_size + payload_size;
+            detail::buffer_format::entry_header_size + payload_size;
         VERIFY(payload_size <= max_entry_size(),
                "Entry payload size exceeds maximum entry size");
 
         // Align offset to 4-byte boundary for entry header
-        m_offset =
-            buffer_format::align_up(m_offset, buffer_format::entry_alignment);
+        m_offset = detail::buffer_format::align_up(
+            m_offset, detail::buffer_format::entry_alignment);
 
         // Check if entry fits in remaining buffer space (also handle the case
         // where offset is past the end of the buffer)
@@ -209,22 +206,23 @@ public:
 
             // Check if we have enough space at the end of the buffer to write
             // the wrap entry (If not the wrap entry is implicit)
-            if (remaining_space >= buffer_format::entry_header_size)
+            if (remaining_space >= detail::buffer_format::entry_header_size)
             {
-                auto header = buffer_format::entry_header(m_buffer.subspan(
-                    m_offset, buffer_format::entry_header_size));
+                auto header =
+                    detail::buffer_format::entry_header(m_buffer.subspan(
+                        m_offset, detail::buffer_format::entry_header_size));
                 // Length 1 with commit flag set (MSB = 1)
-                portable_atomic::store_release(
-                    header,
-                    buffer_format::set_commit(static_cast<uint32_t>(1)));
+                detail::atomic::store_release(header,
+                                              detail::buffer_format::set_commit(
+                                                  static_cast<uint32_t>(1)));
             }
 
             // Wrap the buffer
             m_current_chunk_index = 0;
-            m_offset = buffer_format::buffer_header_size +
-                       (m_chunk_count * buffer_format::chunk_row_size);
-            m_offset = buffer_format::align_up(m_offset,
-                                               buffer_format::entry_alignment);
+            m_offset = detail::buffer_format::buffer_header_size +
+                       (m_chunk_count * detail::buffer_format::chunk_row_size);
+            m_offset = detail::buffer_format::align_up(
+                m_offset, detail::buffer_format::entry_alignment);
             initialize_chunk(chunk_row(m_current_chunk_index), m_offset,
                              m_total_entries_written);
         }
@@ -274,43 +272,47 @@ public:
                 continue;
             }
             auto info = chunk_row(chunk_index);
-            portable_atomic::store_release(buffer_format::chunk_token(info),
-                                           static_cast<uint64_t>(0));
-            portable_atomic::store_release(buffer_format::chunk_offset(info),
-                                           static_cast<uint64_t>(0));
+            detail::atomic::store_release(
+                detail::buffer_format::chunk_token(info),
+                static_cast<uint64_t>(0));
+            detail::atomic::store_release(
+                detail::buffer_format::chunk_offset(info),
+                static_cast<uint64_t>(0));
         }
 
-        auto header = buffer_format::entry_header(
+        auto header = detail::buffer_format::entry_header(
             m_buffer.subspan(m_offset, total_entry_size));
         // Length 1 with commit flag set (MSB = 1)
-        VERIFY(!buffer_format::is_committed(total_entry_size));
-        portable_atomic::store_release(header, total_entry_size);
+        VERIFY(!detail::buffer_format::is_committed(total_entry_size));
+        detail::atomic::store_release(header, total_entry_size);
 
         // Write entry payload
-        std::copy(entry.begin(), entry.end(),
-                  m_buffer
-                      .subspan(m_offset + buffer_format::entry_header_size,
-                               entry.size())
-                      .begin());
+        std::copy(
+            entry.begin(), entry.end(),
+            m_buffer
+                .subspan(m_offset + detail::buffer_format::entry_header_size,
+                         entry.size())
+                .begin());
 
         // Update state
         m_total_entries_written++;
         m_offset += total_entry_size;
-        m_offset =
-            buffer_format::align_up(m_offset, buffer_format::entry_alignment);
+        m_offset = detail::buffer_format::align_up(
+            m_offset, detail::buffer_format::entry_alignment);
 
         // Zero out the next entry header if there is space
-        if (m_offset + buffer_format::entry_header_size <= m_buffer.size())
+        if (m_offset + detail::buffer_format::entry_header_size <=
+            m_buffer.size())
         {
-            auto next_header_span =
-                m_buffer.subspan(m_offset, buffer_format::entry_header_size);
+            auto next_header_span = m_buffer.subspan(
+                m_offset, detail::buffer_format::entry_header_size);
             std::memset(next_header_span.data(), 0,
-                        buffer_format::entry_header_size);
+                        detail::buffer_format::entry_header_size);
         }
 
         // Commit the entry
-        portable_atomic::store_release(
-            header, buffer_format::set_commit(total_entry_size));
+        detail::atomic::store_release(
+            header, detail::buffer_format::set_commit(total_entry_size));
 
         // check if the current chunk is committed
         if (!is_chunk_committed(m_current_chunk_index))
@@ -326,12 +328,12 @@ public:
     {
         VERIFY(!m_buffer.empty(), "Writer not configured");
         auto header_and_chunk_table =
-            buffer_format::buffer_header_size +
-            (m_chunk_count * buffer_format::chunk_row_size);
-        header_and_chunk_table = buffer_format::align_up(
-            header_and_chunk_table, buffer_format::entry_alignment);
+            detail::buffer_format::buffer_header_size +
+            (m_chunk_count * detail::buffer_format::chunk_row_size);
+        header_and_chunk_table = detail::buffer_format::align_up(
+            header_and_chunk_table, detail::buffer_format::entry_alignment);
         auto usable_size = m_buffer.size() - header_and_chunk_table;
-        return usable_size - buffer_format::entry_header_size;
+        return usable_size - detail::buffer_format::entry_header_size;
     }
 
     /// Get the chunk size.
@@ -352,36 +354,38 @@ private:
     static void initialize_chunk(std::span<uint8_t> info, uint64_t offset,
                                  uint64_t token)
     {
-        VERIFY(offset % buffer_format::entry_alignment == 0,
+        VERIFY(offset % detail::buffer_format::entry_alignment == 0,
                "Chunk offset is not aligned to entry alignment", offset,
-               buffer_format::entry_alignment);
+               detail::buffer_format::entry_alignment);
 
         // Store token first
-        portable_atomic::store_release(buffer_format::chunk_token(info), token);
+        detail::atomic::store_release(detail::buffer_format::chunk_token(info),
+                                      token);
 
         // Store offset with MSB cleared (uncommitted)
-        VERIFY(!buffer_format::is_committed(offset),
+        VERIFY(!detail::buffer_format::is_committed(offset),
                "Chunk offset commit flag must be cleared on init", offset);
-        portable_atomic::store_release(buffer_format::chunk_offset(info),
-                                       offset);
+        detail::atomic::store_release(detail::buffer_format::chunk_offset(info),
+                                      offset);
     }
 
     auto is_chunk_committed(std::size_t chunk_index) const -> bool
     {
         // Note we do not need to load aquire here since the writer is the only
         // one modifying the commit flag
-        return buffer_format::is_committed(
-            *buffer_format::chunk_offset(chunk_row(chunk_index)));
+        return detail::buffer_format::is_committed(
+            *detail::buffer_format::chunk_offset(chunk_row(chunk_index)));
     }
 
     void commit_chunk(std::size_t chunk_index)
     {
-        auto offset = buffer_format::chunk_offset(chunk_row(chunk_index));
-        VERIFY(!buffer_format::is_committed(*offset),
+        auto offset =
+            detail::buffer_format::chunk_offset(chunk_row(chunk_index));
+        VERIFY(!detail::buffer_format::is_committed(*offset),
                "Chunk already committed");
 
-        portable_atomic::store_release(offset,
-                                       buffer_format::set_commit(*offset));
+        detail::atomic::store_release(
+            offset, detail::buffer_format::set_commit(*offset));
     }
 
     auto get_chunk_offset(std::size_t chunk_index) const -> std::size_t
@@ -389,16 +393,17 @@ private:
         // Clear the commit flag regardless if it's there
         if (is_chunk_committed(chunk_index))
         {
-            return buffer_format::clear_commit(
-                *buffer_format::chunk_offset(chunk_row(chunk_index)));
+            return detail::buffer_format::clear_commit(
+                *detail::buffer_format::chunk_offset(chunk_row(chunk_index)));
         }
-        return *buffer_format::chunk_offset(chunk_row(chunk_index));
+        return *detail::buffer_format::chunk_offset(chunk_row(chunk_index));
     }
 
     auto chunk_row(std::size_t chunk_index) const -> std::span<uint8_t>
     {
-        return m_buffer.subspan(buffer_format::chunk_row_offset(chunk_index),
-                                buffer_format::chunk_row_size);
+        return m_buffer.subspan(
+            detail::buffer_format::chunk_row_offset(chunk_index),
+            detail::buffer_format::chunk_row_size);
     }
 
     // Helper functions to write values using memcpy (alignment-safe)
@@ -412,9 +417,9 @@ private:
 
     void write_header(std::span<uint8_t> buffer, uint32_t chunk_count)
     {
-        VERIFY(buffer.size() >= buffer_format::buffer_header_size,
+        VERIFY(buffer.size() >= detail::buffer_format::buffer_header_size,
                "Buffer size must be at least {}",
-               buffer_format::buffer_header_size);
+               detail::buffer_format::buffer_header_size);
         VERIFY(reinterpret_cast<uintptr_t>(buffer.data()) % alignof(uint64_t) ==
                    0,
                "Buffer must be 8-byte aligned");
@@ -422,15 +427,16 @@ private:
         // Write header fields first (magic written last to ensure fully
         // initialized buffer)
         // Offset 8: Version (4 bytes)
-        write_value(buffer.subspan(8, 4), buffer_format::version);
+        write_value(buffer.subspan(8, 4), detail::buffer_format::version);
 
         // Offset 12: Chunk count (4 bytes)
         write_value(buffer.subspan(12, 4), chunk_count);
 
         // Offset 0: Magic value (8 bytes) - written atomically with release
         // semantics
-        portable_atomic::store_release(
-            reinterpret_cast<uint64_t*>(buffer.data()), buffer_format::magic);
+        detail::atomic::store_release(
+            reinterpret_cast<uint64_t*>(buffer.data()),
+            detail::buffer_format::magic);
     }
 
 private:

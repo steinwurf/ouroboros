@@ -17,20 +17,16 @@
 #include <string_view>
 #include <vector>
 
+#include "detail/atomic.hpp"
 #include "detail/buffer_format.hpp"
-#include "error_code.hpp"
-#include "detail/portable_atomic.hpp"
 #include "detail/span.hpp"
+#include "error_code.hpp"
 #include "version.hpp"
 
 namespace ouroboros
 {
 inline namespace STEINWURF_OUROBOROS_VERSION
 {
-
-using detail::buffer_format;
-using detail::portable_atomic;
-
 /// A log reader that safely reads from a circular buffer managed by a writer.
 ///
 /// The reader uses chunk tokens as synchronization guards to detect when
@@ -70,8 +66,8 @@ public:
 
         bool is_valid() const
         {
-            const uint64_t current_token = portable_atomic::load_acquire(
-                buffer_format::chunk_token(chunk_row));
+            const uint64_t current_token = detail::atomic::load_acquire(
+                detail::buffer_format::chunk_token(chunk_row));
             return chunk_token == current_token;
         }
     };
@@ -80,7 +76,7 @@ public:
 
     static auto is_ready(std::span<const uint8_t> buffer) -> bool
     {
-        VERIFY(buffer.size() >= buffer_format::buffer_header_size);
+        VERIFY(buffer.size() >= detail::buffer_format::buffer_header_size);
         if (buffer.size() < 8)
         {
             return false;
@@ -88,17 +84,17 @@ public:
 
         // Load magic value atomically with acquire semantics
         // This ensures all previous writes (version, chunk_count) are visible
-        const uint64_t magic_value = portable_atomic::load_acquire(
+        const uint64_t magic_value = detail::atomic::load_acquire(
             reinterpret_cast<const uint64_t*>(buffer.data()));
 
-        return magic_value == buffer_format::magic;
+        return magic_value == detail::buffer_format::magic;
     }
 
     auto configure(std::span<const uint8_t> buffer,
                    read_strategy strategy = read_strategy::auto_detect)
         -> tl::expected<void, std::error_code>
     {
-        VERIFY(buffer.size() >= buffer_format::buffer_header_size,
+        VERIFY(buffer.size() >= detail::buffer_format::buffer_header_size,
                "Buffer too small for header");
 
         if (!is_ready(buffer))
@@ -108,7 +104,7 @@ public:
         }
 
         const uint32_t version = read_value<uint32_t>(buffer.data() + 8);
-        if (version != buffer_format::version)
+        if (version != detail::buffer_format::version)
         {
             return tl::make_unexpected(
                 make_error_code(ouroboros::error::unsupported_version));
@@ -124,7 +120,7 @@ public:
 
         // Validate buffer is at least large enough for header and chunk table
         const std::size_t min_buffer_size =
-            buffer_format::compute_buffer_header_size(chunk_count);
+            detail::buffer_format::compute_buffer_header_size(chunk_count);
         if (buffer.size() < min_buffer_size)
         {
             return tl::make_unexpected(
@@ -154,17 +150,19 @@ public:
     {
         VERIFY(!m_buffer.empty(), "Reader not configured");
         VERIFY(m_offset != 0, "Reader not properly configured - offset is 0");
-        VERIFY(m_offset % buffer_format::entry_alignment == 0,
-               "Offset not aligned", m_offset, buffer_format::entry_alignment);
+        VERIFY(m_offset % detail::buffer_format::entry_alignment == 0,
+               "Offset not aligned", m_offset,
+               detail::buffer_format::entry_alignment);
         // Retry loop: wrap / stale chunk / uncommitted entry all resolve by
         // either jumping and retrying, or returning no_data().
         for (;;)
         {
-            VERIFY(m_offset % buffer_format::entry_alignment == 0,
+            VERIFY(m_offset % detail::buffer_format::entry_alignment == 0,
                    "Offset not aligned", m_offset,
-                   buffer_format::entry_alignment);
+                   detail::buffer_format::entry_alignment);
             // Implicit wrap: no room for header.
-            if (m_offset + buffer_format::entry_header_size > m_buffer.size())
+            if (m_offset + detail::buffer_format::entry_header_size >
+                m_buffer.size())
             {
                 // Jump to the first chunk.
                 if (!jump_to_chunk(0))
@@ -179,11 +177,12 @@ public:
             }
 
             // We have room for the entry header, read it.
-            const uint32_t* entry_header = buffer_format::entry_header(
-                m_buffer.subspan(m_offset, buffer_format::entry_header_size));
+            const uint32_t* entry_header =
+                detail::buffer_format::entry_header(m_buffer.subspan(
+                    m_offset, detail::buffer_format::entry_header_size));
 
             const uint32_t length_with_flag =
-                portable_atomic::load_acquire(entry_header);
+                detail::atomic::load_acquire(entry_header);
 
             // Check if the read was valid by checking the chunk token.
             if (!is_chunk_committed(m_buffer, m_current_chunk_index) ||
@@ -214,7 +213,7 @@ public:
             }
 
             // Check if the entry is committed.
-            if (!buffer_format::is_committed(length_with_flag))
+            if (!detail::buffer_format::is_committed(length_with_flag))
             {
                 // The entry is not committed. No data available.
                 return tl::make_unexpected(
@@ -223,7 +222,7 @@ public:
 
             // Clear the commit flag and get the length of the entry.
             const std::size_t length =
-                buffer_format::clear_commit(length_with_flag);
+                detail::buffer_format::clear_commit(length_with_flag);
 
             // Check if the entry length is valid.
             if (length == 0)
@@ -253,9 +252,9 @@ public:
             // Check if the entry length is valid.
             // We already check the 0 and 1 cases above. So we can assume that
             // the length is greater than the header size.
-            VERIFY(length >= buffer_format::entry_header_size,
+            VERIFY(length >= detail::buffer_format::entry_header_size,
                    "Entry length smaller than header size", length,
-                   buffer_format::entry_header_size);
+                   detail::buffer_format::entry_header_size);
             // Check that the entry fits in the buffer.
             VERIFY(m_offset + length <= m_buffer.size(),
                    "Entry exceeds buffer bounds", m_offset, length,
@@ -286,9 +285,10 @@ public:
 
             // Extract payload
             const std::size_t payload_size =
-                length - buffer_format::entry_header_size;
+                length - detail::buffer_format::entry_header_size;
             const char* payload_data = reinterpret_cast<const char*>(
-                m_buffer.data() + m_offset + buffer_format::entry_header_size);
+                m_buffer.data() + m_offset +
+                detail::buffer_format::entry_header_size);
             std::string_view payload_view(payload_data, payload_size);
 
             // Chunk row for validity checks
@@ -296,8 +296,8 @@ public:
 
             // Advance
             m_offset += length;
-            m_offset = buffer_format::align_up(m_offset,
-                                               buffer_format::entry_alignment);
+            m_offset = detail::buffer_format::align_up(
+                m_offset, detail::buffer_format::entry_alignment);
             m_total_entries_read += 1;
             m_entries_read_in_current_chunk += 1;
 
@@ -350,37 +350,39 @@ private:
     static auto chunk_row(std::span<const uint8_t> buffer,
                           std::size_t chunk_index) -> std::span<const uint8_t>
     {
-        return buffer.subspan(buffer_format::chunk_row_offset(chunk_index),
-                              buffer_format::chunk_row_size);
+        return buffer.subspan(
+            detail::buffer_format::chunk_row_offset(chunk_index),
+            detail::buffer_format::chunk_row_size);
     }
 
     static auto get_chunk_offset(std::span<const uint8_t> buffer,
                                  std::size_t chunk_index) -> std::size_t
     {
         const auto& info = chunk_row(buffer, chunk_index);
-        const uint64_t offset_value =
-            portable_atomic::load_acquire(buffer_format::chunk_offset(info));
-        if (!buffer_format::is_committed(offset_value))
+        const uint64_t offset_value = detail::atomic::load_acquire(
+            detail::buffer_format::chunk_offset(info));
+        if (!detail::buffer_format::is_committed(offset_value))
         {
             return 0;
         }
-        return buffer_format::clear_commit(offset_value);
+        return detail::buffer_format::clear_commit(offset_value);
     }
 
     static auto get_chunk_token(std::span<const uint8_t> buffer,
                                 std::size_t chunk_index) -> uint64_t
     {
         const auto& info = chunk_row(buffer, chunk_index);
-        return portable_atomic::load_acquire(buffer_format::chunk_token(info));
+        return detail::atomic::load_acquire(
+            detail::buffer_format::chunk_token(info));
     }
 
     static auto is_chunk_committed(std::span<const uint8_t> buffer,
                                    std::size_t chunk_index) -> bool
     {
         const auto& info = chunk_row(buffer, chunk_index);
-        const uint64_t offset_value =
-            portable_atomic::load_acquire(buffer_format::chunk_offset(info));
-        return buffer_format::is_committed(offset_value);
+        const uint64_t offset_value = detail::atomic::load_acquire(
+            detail::buffer_format::chunk_offset(info));
+        return detail::buffer_format::is_committed(offset_value);
     }
 
     static auto
@@ -437,9 +439,9 @@ private:
             return false;
         }
 
-        VERIFY(chunk_offset % buffer_format::entry_alignment == 0,
+        VERIFY(chunk_offset % detail::buffer_format::entry_alignment == 0,
                "Chunk offset is not aligned to entry alignment", chunk_offset,
-               buffer_format::entry_alignment);
+               detail::buffer_format::entry_alignment);
         const auto chunk_token = get_chunk_token(m_buffer, chunk_index);
         if (chunk_token < m_current_chunk_token)
         {

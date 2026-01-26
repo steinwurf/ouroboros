@@ -35,7 +35,7 @@ auto create_aligned_buffer(std::size_t size) -> std::vector<uint8_t>
 }
 }
 
-TEST(test_log, size_calculations)
+TEST(test_reader_writer, size_calculations)
 {
     constexpr std::size_t chunk_row_size = 16;
     constexpr std::size_t buffer_header_size = 16;
@@ -67,8 +67,9 @@ TEST(test_log, size_calculations)
     for (const auto& [chunk_target_size, chunk_count, expected_size] :
          test_cases)
     {
-        auto buffer_size = ouroboros::buffer_format::compute_buffer_size(
-            chunk_target_size, chunk_count);
+        auto buffer_size =
+            ouroboros::detail::buffer_format::compute_buffer_size(
+                chunk_target_size, chunk_count);
         SCOPED_TRACE(
             ::testing::Message()
             << "chunk_target_size: " << chunk_target_size << " chunk_count: "
@@ -79,11 +80,11 @@ TEST(test_log, size_calculations)
     }
 }
 
-TEST(test_log, buffer_readiness)
+TEST(test_reader_writer, buffer_readiness)
 {
     constexpr std::size_t chunk_target_size = 1024;
     constexpr std::size_t chunk_count = 4;
-    auto buffer_size = ouroboros::buffer_format::compute_buffer_size(
+    auto buffer_size = ouroboros::detail::buffer_format::compute_buffer_size(
         chunk_target_size, chunk_count);
     auto buffer = create_aligned_buffer(buffer_size);
     std::span<uint8_t> buffer_span(buffer);
@@ -107,11 +108,11 @@ TEST(test_log, buffer_readiness)
         ouroboros::reader::is_ready(std::span<const uint8_t>(uninit_buffer)));
 }
 
-TEST(test_log, writer_configure)
+TEST(test_reader_writer, writer_configure)
 {
     constexpr std::size_t chunk_target_size = 1024;
     constexpr std::size_t chunk_count = 4;
-    auto buffer_size = ouroboros::buffer_format::compute_buffer_size(
+    auto buffer_size = ouroboros::detail::buffer_format::compute_buffer_size(
         chunk_target_size, chunk_count);
     auto buffer = create_aligned_buffer(buffer_size);
     std::span<uint8_t> buffer_span(buffer);
@@ -124,11 +125,11 @@ TEST(test_log, writer_configure)
     EXPECT_GT(writer.max_entry_size(), 0U);
 }
 
-TEST(test_log, writer_write_single_entry)
+TEST(test_reader_writer, writer_write_single_entry)
 {
     constexpr std::size_t chunk_target_size = 1024;
     constexpr std::size_t chunk_count = 4;
-    auto buffer_size = ouroboros::buffer_format::compute_buffer_size(
+    auto buffer_size = ouroboros::detail::buffer_format::compute_buffer_size(
         chunk_target_size, chunk_count);
     auto buffer = create_aligned_buffer(buffer_size);
     std::span<uint8_t> buffer_span(buffer);
@@ -154,11 +155,11 @@ TEST(test_log, writer_write_single_entry)
     EXPECT_FALSE(no_more.has_value());
 }
 
-TEST(test_log, writer_write_multiple_entries)
+TEST(test_reader_writer, writer_write_multiple_entries)
 {
     constexpr std::size_t chunk_target_size = 1024;
     constexpr std::size_t chunk_count = 4;
-    auto buffer_size = ouroboros::buffer_format::compute_buffer_size(
+    auto buffer_size = ouroboros::detail::buffer_format::compute_buffer_size(
         chunk_target_size, chunk_count);
     auto buffer = create_aligned_buffer(buffer_size);
     std::span<uint8_t> buffer_span(buffer);
@@ -193,11 +194,11 @@ TEST(test_log, writer_write_multiple_entries)
     EXPECT_FALSE(no_more.has_value());
 }
 
-TEST(test_log, reader_configure)
+TEST(test_reader_writer, reader_configure)
 {
     constexpr std::size_t chunk_target_size = 1024;
     constexpr std::size_t chunk_count = 4;
-    auto buffer_size = ouroboros::buffer_format::compute_buffer_size(
+    auto buffer_size = ouroboros::detail::buffer_format::compute_buffer_size(
         chunk_target_size, chunk_count);
     auto buffer = create_aligned_buffer(buffer_size);
     std::span<uint8_t> buffer_span(buffer);
@@ -218,11 +219,11 @@ TEST(test_log, reader_configure)
     EXPECT_EQ(reader.chunk_count(), chunk_count);
 }
 
-TEST(test_log, reader_empty_buffer_handling)
+TEST(test_reader_writer, reader_empty_buffer_handling)
 {
     constexpr std::size_t chunk_target_size = 1024;
     constexpr std::size_t chunk_count = 4;
-    auto buffer_size = ouroboros::buffer_format::compute_buffer_size(
+    auto buffer_size = ouroboros::detail::buffer_format::compute_buffer_size(
         chunk_target_size, chunk_count);
     auto buffer = create_aligned_buffer(buffer_size);
     std::span<uint8_t> buffer_span(buffer);
@@ -241,7 +242,7 @@ TEST(test_log, reader_empty_buffer_handling)
               ouroboros::make_error_code(ouroboros::error::no_data_available));
 }
 
-TEST(test_log, reader_configure_invalid_magic)
+TEST(test_reader_writer, reader_configure_invalid_magic)
 {
     std::vector<uint8_t> buffer(1000);
     std::memset(buffer.data(), 0, buffer.size());
@@ -256,11 +257,11 @@ TEST(test_log, reader_configure_invalid_magic)
     EXPECT_FALSE(result.has_value());
 }
 
-TEST(test_log, reader_configure_invalid_version)
+TEST(test_reader_writer, reader_configure_invalid_version)
 {
     constexpr std::size_t chunk_target_size = 1024;
     constexpr std::size_t chunk_count = 4;
-    auto buffer_size = ouroboros::buffer_format::compute_buffer_size(
+    auto buffer_size = ouroboros::detail::buffer_format::compute_buffer_size(
         chunk_target_size, chunk_count);
     auto buffer = create_aligned_buffer(buffer_size);
     std::span<uint8_t> buffer_span(buffer);
@@ -280,11 +281,11 @@ TEST(test_log, reader_configure_invalid_version)
     EXPECT_FALSE(result.has_value());
 }
 
-TEST(test_log, entry_alignment)
+TEST(test_reader_writer, entry_alignment)
 {
     constexpr std::size_t chunk_target_size = 1024;
     constexpr std::size_t chunk_count = 4;
-    auto buffer_size = ouroboros::buffer_format::compute_buffer_size(
+    auto buffer_size = ouroboros::detail::buffer_format::compute_buffer_size(
         chunk_target_size, chunk_count);
     auto buffer = create_aligned_buffer(buffer_size);
     std::span<uint8_t> buffer_span(buffer);
@@ -308,11 +309,11 @@ TEST(test_log, entry_alignment)
     EXPECT_EQ(reader.read_next_entry()->data, "DDDD");
 }
 
-TEST(test_log, wrap_behavior)
+TEST(test_reader_writer, wrap_behavior)
 {
     constexpr std::size_t chunk_target_size = 64; // Small chunk size
     constexpr std::size_t chunk_count = 2;
-    auto buffer_size = ouroboros::buffer_format::compute_buffer_size(
+    auto buffer_size = ouroboros::detail::buffer_format::compute_buffer_size(
         chunk_target_size, chunk_count);
     auto buffer = create_aligned_buffer(buffer_size);
     std::span<uint8_t> buffer_span(buffer);
@@ -349,11 +350,11 @@ TEST(test_log, wrap_behavior)
               20); // Make sure we actually wrapped and lost some entries
 }
 
-TEST(test_log, chunk_advancement)
+TEST(test_reader_writer, chunk_advancement)
 {
     constexpr std::size_t chunk_target_size = 128;
     constexpr std::size_t chunk_count = 4;
-    auto buffer_size = ouroboros::buffer_format::compute_buffer_size(
+    auto buffer_size = ouroboros::detail::buffer_format::compute_buffer_size(
         chunk_target_size, chunk_count);
     auto buffer = create_aligned_buffer(buffer_size);
     std::span<uint8_t> buffer_span(buffer);
@@ -410,11 +411,11 @@ TEST(test_log, chunk_advancement)
     EXPECT_GT(read_count, 0);
 }
 
-TEST(test_log, minimal_entry)
+TEST(test_reader_writer, minimal_entry)
 {
     constexpr std::size_t chunk_target_size = 1024;
     constexpr std::size_t chunk_count = 4;
-    auto buffer_size = ouroboros::buffer_format::compute_buffer_size(
+    auto buffer_size = ouroboros::detail::buffer_format::compute_buffer_size(
         chunk_target_size, chunk_count);
     auto buffer = create_aligned_buffer(buffer_size);
     std::span<uint8_t> buffer_span(buffer);
@@ -434,11 +435,11 @@ TEST(test_log, minimal_entry)
     EXPECT_EQ(entry_result->data, "X");
 }
 
-TEST(test_log, maximum_entry)
+TEST(test_reader_writer, maximum_entry)
 {
     constexpr std::size_t chunk_target_size = 128;
     constexpr std::size_t chunk_count = 4;
-    auto buffer_size = ouroboros::buffer_format::compute_buffer_size(
+    auto buffer_size = ouroboros::detail::buffer_format::compute_buffer_size(
         chunk_target_size, chunk_count);
     auto buffer = create_aligned_buffer(buffer_size);
     std::span<uint8_t> buffer_span(buffer);
@@ -460,11 +461,11 @@ TEST(test_log, maximum_entry)
     EXPECT_EQ(entry_result->data, large_entry);
 }
 
-TEST(test_log, reader_token_validation)
+TEST(test_reader_writer, reader_token_validation)
 {
     constexpr std::size_t chunk_target_size = 128;
     constexpr std::size_t chunk_count = 4;
-    auto buffer_size = ouroboros::buffer_format::compute_buffer_size(
+    auto buffer_size = ouroboros::detail::buffer_format::compute_buffer_size(
         chunk_target_size, chunk_count);
     auto buffer = create_aligned_buffer(buffer_size);
     std::span<uint8_t> buffer_span(buffer);
@@ -495,11 +496,11 @@ TEST(test_log, reader_token_validation)
     EXPECT_FALSE(entry_result->is_valid());
 }
 
-TEST(test_log, multiple_readers)
+TEST(test_reader_writer, multiple_readers)
 {
     constexpr std::size_t chunk_target_size = 128;
     constexpr std::size_t chunk_count = 4;
-    auto buffer_size = ouroboros::buffer_format::compute_buffer_size(
+    auto buffer_size = ouroboros::detail::buffer_format::compute_buffer_size(
         chunk_target_size, chunk_count);
     auto buffer = create_aligned_buffer(buffer_size);
     std::span<uint8_t> buffer_span(buffer);
@@ -537,11 +538,11 @@ TEST(test_log, multiple_readers)
     }
 }
 
-TEST(test_log, reader_starting_chunk_selection)
+TEST(test_reader_writer, reader_starting_chunk_selection)
 {
     constexpr std::size_t chunk_target_size = 128;
     constexpr std::size_t chunk_count = 2;
-    auto buffer_size = ouroboros::buffer_format::compute_buffer_size(
+    auto buffer_size = ouroboros::detail::buffer_format::compute_buffer_size(
         chunk_target_size, chunk_count);
     auto buffer = create_aligned_buffer(buffer_size);
     std::span<uint8_t> buffer_span(buffer);
@@ -591,11 +592,11 @@ auto generate_entry(std::size_t entry_counter,
     return entry;
 }
 
-TEST(test_log, reader_detects_overwritten_entry)
+TEST(test_reader_writer, reader_detects_overwritten_entry)
 {
     constexpr std::size_t chunk_target_size = 64; // Small chunk to force wraps
     constexpr std::size_t chunk_count = 2;
-    auto buffer_size = ouroboros::buffer_format::compute_buffer_size(
+    auto buffer_size = ouroboros::detail::buffer_format::compute_buffer_size(
         chunk_target_size, chunk_count);
     auto buffer = create_aligned_buffer(buffer_size);
     std::span<uint8_t> buffer_span(buffer);
@@ -657,11 +658,11 @@ TEST(test_log, reader_detects_overwritten_entry)
     EXPECT_GT(read_count, 0) << "Should have read at least one entry";
 }
 
-TEST(test_log, reader_writer_interleaved_operations)
+TEST(test_reader_writer, reader_writer_interleaved_operations)
 {
     constexpr std::size_t chunk_target_size = 1024;
     constexpr std::size_t chunk_count = 4;
-    auto buffer_size = ouroboros::buffer_format::compute_buffer_size(
+    auto buffer_size = ouroboros::detail::buffer_format::compute_buffer_size(
         chunk_target_size, chunk_count);
     auto buffer = create_aligned_buffer(buffer_size);
     std::span<uint8_t> buffer_span(buffer);
@@ -712,11 +713,11 @@ TEST(test_log, reader_writer_interleaved_operations)
               ouroboros::make_error_code(ouroboros::error::no_data_available));
 }
 
-TEST(test_log, reader_handles_rapid_writes)
+TEST(test_reader_writer, reader_handles_rapid_writes)
 {
     constexpr std::size_t chunk_target_size = 128;
     constexpr std::size_t chunk_count = 3;
-    auto buffer_size = ouroboros::buffer_format::compute_buffer_size(
+    auto buffer_size = ouroboros::detail::buffer_format::compute_buffer_size(
         chunk_target_size, chunk_count);
     auto buffer = create_aligned_buffer(buffer_size);
     std::span<uint8_t> buffer_span(buffer);
@@ -763,11 +764,11 @@ TEST(test_log, reader_handles_rapid_writes)
         << "Should not read more entries than written";
 }
 
-TEST(test_log, chunk_invalidation_and_wrap_sequence)
+TEST(test_reader_writer, chunk_invalidation_and_wrap_sequence)
 {
     constexpr std::size_t chunk_target_size = 256;
     constexpr std::size_t chunk_count = 4;
-    auto buffer_size = ouroboros::buffer_format::compute_buffer_size(
+    auto buffer_size = ouroboros::detail::buffer_format::compute_buffer_size(
         chunk_target_size, chunk_count);
     auto buffer = create_aligned_buffer(buffer_size);
     std::span<uint8_t> buffer_span(buffer);
@@ -780,13 +781,14 @@ TEST(test_log, chunk_invalidation_and_wrap_sequence)
     // Each entry is already 4-byte aligned
     constexpr std::size_t entry_payload_size = 4;
     constexpr std::size_t entry_total_size =
-        ouroboros::buffer_format::entry_header_size + entry_payload_size;
+        ouroboros::detail::buffer_format::entry_header_size +
+        entry_payload_size;
     // entry_total_size = 4 + 4 = 8 bytes
 
     // Calculate usable space: buffer_size - (header + chunk_table) - alignment
     constexpr std::size_t header_and_table =
-        ouroboros::buffer_format::buffer_header_size +
-        (chunk_count * ouroboros::buffer_format::chunk_row_size);
+        ouroboros::detail::buffer_format::buffer_header_size +
+        (chunk_count * ouroboros::detail::buffer_format::chunk_row_size);
     // header_and_table = 16 + (4 * 16) = 80 bytes
     // First chunk starts at 80, which is already 4-byte aligned
     const std::size_t usable_space = buffer_size - header_and_table;
@@ -900,7 +902,7 @@ TEST(test_log, chunk_invalidation_and_wrap_sequence)
         chunk_target_size - entry_total_size;
     constexpr std::size_t large_entry_payload_size =
         remaining_in_chunk_0 + chunk_target_size + chunk_target_size -
-        ouroboros::buffer_format::entry_header_size;
+        ouroboros::detail::buffer_format::entry_header_size;
     // large_entry_payload_size = (256 - 8) + 256 + 256 - 4 = 756 bytes
 
     std::string large_entry(large_entry_payload_size, 'L');
@@ -1026,12 +1028,12 @@ TEST(test_log, chunk_invalidation_and_wrap_sequence)
     }
 }
 
-TEST(test_log, multi_threaded_with_wraps)
+TEST(test_reader_writer, multi_threaded_with_wraps)
 {
     // Use a small buffer to force multiple wraps
     constexpr std::size_t chunk_target_size = 1024;
     constexpr std::size_t chunk_count = 42;
-    auto buffer_size = ouroboros::buffer_format::compute_buffer_size(
+    auto buffer_size = ouroboros::detail::buffer_format::compute_buffer_size(
         chunk_target_size, chunk_count);
     auto buffer = create_aligned_buffer(buffer_size);
     std::span<uint8_t> buffer_span(buffer);

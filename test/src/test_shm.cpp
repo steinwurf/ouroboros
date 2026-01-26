@@ -37,7 +37,7 @@ auto generate_shm_name() -> std::string
 }
 }
 
-TEST(test_shm_log, writer_configure)
+TEST(test_shm, writer_configure)
 {
     constexpr std::size_t chunk_target_size = 1024;
     constexpr std::size_t chunk_count = 4;
@@ -55,7 +55,7 @@ TEST(test_shm_log, writer_configure)
     EXPECT_GT(writer.buffer_size(), 0U);
 }
 
-TEST(test_shm_log, reader_configure_before_writer)
+TEST(test_shm, reader_configure_before_writer)
 {
     auto shm_name = generate_shm_name();
 
@@ -65,7 +65,7 @@ TEST(test_shm_log, reader_configure_before_writer)
         << "Reader should fail to configure before writer creates shm";
 }
 
-TEST(test_shm_log, writer_reader_basic)
+TEST(test_shm, writer_reader_basic)
 {
     constexpr std::size_t chunk_target_size = 1024;
     constexpr std::size_t chunk_count = 4;
@@ -89,7 +89,7 @@ TEST(test_shm_log, writer_reader_basic)
     EXPECT_GT(reader.buffer_size(), 0U);
 }
 
-TEST(test_shm_log, writer_write_single_entry)
+TEST(test_shm, writer_write_single_entry)
 {
     constexpr std::size_t chunk_target_size = 1024;
     constexpr std::size_t chunk_count = 4;
@@ -119,7 +119,7 @@ TEST(test_shm_log, writer_write_single_entry)
     EXPECT_FALSE(no_more.has_value());
 }
 
-TEST(test_shm_log, writer_write_multiple_entries)
+TEST(test_shm, writer_write_multiple_entries)
 {
     constexpr std::size_t chunk_target_size = 1024;
     constexpr std::size_t chunk_count = 4;
@@ -156,7 +156,7 @@ TEST(test_shm_log, writer_write_multiple_entries)
     EXPECT_FALSE(no_more.has_value());
 }
 
-TEST(test_shm_log, reader_empty_buffer_handling)
+TEST(test_shm, reader_empty_buffer_handling)
 {
     constexpr std::size_t chunk_target_size = 1024;
     constexpr std::size_t chunk_count = 4;
@@ -178,7 +178,7 @@ TEST(test_shm_log, reader_empty_buffer_handling)
               ouroboros::make_error_code(ouroboros::error::no_data_available));
 }
 
-TEST(test_shm_log, multiple_readers)
+TEST(test_shm, multiple_readers)
 {
     constexpr std::size_t chunk_target_size = 1024;
     constexpr std::size_t chunk_count = 4;
@@ -219,7 +219,7 @@ TEST(test_shm_log, multiple_readers)
     }
 }
 
-TEST(test_shm_log, reader_writer_interleaved_operations)
+TEST(test_shm, reader_writer_interleaved_operations)
 {
     constexpr std::size_t chunk_target_size = 1024;
     constexpr std::size_t chunk_count = 4;
@@ -273,7 +273,7 @@ TEST(test_shm_log, reader_writer_interleaved_operations)
               ouroboros::make_error_code(ouroboros::error::no_data_available));
 }
 
-TEST(test_shm_log, wrap_behavior)
+TEST(test_shm, wrap_behavior)
 {
     constexpr std::size_t chunk_target_size = 64; // Small chunk size
     constexpr std::size_t chunk_count = 2;
@@ -313,7 +313,7 @@ TEST(test_shm_log, wrap_behavior)
               20); // Make sure we actually wrapped and lost some entries
 }
 
-TEST(test_shm_log, single_writer_single_reader_threaded)
+TEST(test_shm, single_writer_single_reader_threaded)
 {
     constexpr std::size_t chunk_target_size = 1024;
     constexpr std::size_t chunk_count = 4;
@@ -408,7 +408,7 @@ TEST(test_shm_log, single_writer_single_reader_threaded)
     }
 }
 
-TEST(test_shm_log, single_writer_multiple_readers_threaded)
+TEST(test_shm, single_writer_multiple_readers_threaded)
 {
     constexpr std::size_t chunk_target_size = 1024;
     constexpr std::size_t chunk_count = 4;
@@ -516,7 +516,7 @@ TEST(test_shm_log, single_writer_multiple_readers_threaded)
     }
 }
 
-TEST(test_shm_log, multi_threaded_with_wraps)
+TEST(test_shm, multi_threaded_with_wraps)
 {
     // Use a small buffer to force multiple wraps
     constexpr std::size_t chunk_target_size = 512;
@@ -666,7 +666,7 @@ TEST(test_shm_log, multi_threaded_with_wraps)
         << "Unique entries read should not exceed entries written";
 }
 
-TEST(test_shm_log, concurrent_readers_different_starting_points)
+TEST(test_shm, concurrent_readers_different_starting_points)
 {
     constexpr std::size_t chunk_target_size = 512;
     constexpr std::size_t chunk_count = 4;
@@ -756,7 +756,7 @@ TEST(test_shm_log, concurrent_readers_different_starting_points)
     }
 }
 
-TEST(test_shm_log, reader_is_ready)
+TEST(test_shm, reader_is_ready)
 {
     constexpr std::size_t chunk_target_size = 1024;
     constexpr std::size_t chunk_count = 4;
@@ -783,7 +783,7 @@ TEST(test_shm_log, reader_is_ready)
     EXPECT_TRUE(reader.is_ready());
 }
 
-TEST(test_shm_log, move_semantics)
+TEST(test_shm, move_semantics)
 {
     constexpr std::size_t chunk_target_size = 1024;
     constexpr std::size_t chunk_count = 4;
