@@ -32,31 +32,47 @@ namespace detail
 {
 namespace atomic
 {
-namespace detail
+namespace impl
 {
 
-std::uint32_t load_relaxed_impl_u32(const std::uint32_t* p) noexcept
+std::uint32_t load_acquire_impl_u32(const std::uint32_t* p) noexcept
 {
-    // Atomic read via RMW with no change.
-    return static_cast<std::uint32_t>(InterlockedCompareExchange(
-        reinterpret_cast<volatile LONG*>(const_cast<std::uint32_t*>(p)), 0, 0));
+    // On x86/x64, aligned reads of naturally aligned 32-bit values are atomic.
+    // Use volatile read for atomicity without requiring write access to the
+    // page. This works with read-only shared memory mappings (FILE_MAP_READ).
+    // The volatile qualifier ensures the compiler doesn't optimize away or
+    // reorder the read, and on x86/x64, aligned reads are naturally atomic.
+    volatile const std::uint32_t* volatile_p = p;
+    std::uint32_t value = *volatile_p;
+    _ReadBarrier(); // Compiler barrier for acquire semantics - ensures
+                    // subsequent operations don't happen before this load
+                    // completes
+    return value;
 }
 
-std::uint64_t load_relaxed_impl_u64(const std::uint64_t* p) noexcept
+std::uint64_t load_acquire_impl_u64(const std::uint64_t* p) noexcept
 {
-    return static_cast<std::uint64_t>(InterlockedCompareExchange64(
-        reinterpret_cast<volatile LONGLONG*>(const_cast<std::uint64_t*>(p)), 0,
-        0));
+    // On x86/x64, aligned reads of naturally aligned 64-bit values are atomic.
+    // Use volatile read for atomicity without requiring write access to the
+    // page. This works with read-only shared memory mappings (FILE_MAP_READ).
+    // The volatile qualifier ensures the compiler doesn't optimize away or
+    // reorder the read, and on x86/x64, aligned reads are naturally atomic.
+    volatile const std::uint64_t* volatile_p = p;
+    std::uint64_t value = *volatile_p;
+    _ReadBarrier(); // Compiler barrier for acquire semantics - ensures
+                    // subsequent operations don't happen before this load
+                    // completes
+    return value;
 }
 
-void store_relaxed_impl_u32(std::uint32_t* p, std::uint32_t v) noexcept
+void store_release_impl_u32(std::uint32_t* p, std::uint32_t v) noexcept
 {
     // Atomic write via exchange.
     InterlockedExchange(reinterpret_cast<volatile LONG*>(p),
                         static_cast<LONG>(v));
 }
 
-void store_relaxed_impl_u64(std::uint64_t* p, std::uint64_t v) noexcept
+void store_release_impl_u64(std::uint64_t* p, std::uint64_t v) noexcept
 {
     InterlockedExchange64(reinterpret_cast<volatile LONGLONG*>(p),
                           static_cast<LONGLONG>(v));

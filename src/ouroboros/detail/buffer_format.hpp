@@ -10,8 +10,8 @@
 #include <cstdint>
 #include <verify/verify.hpp>
 
-#include "span.hpp"
 #include "../version.hpp"
+#include "span.hpp"
 
 namespace ouroboros
 {
@@ -168,4 +168,3 @@ inline T set_commit(T v) noexcept
 } // namespace detail
 }
 }
-

@@ -148,4 +148,3 @@ void unlink_shm(const std::string& name)
 }
 
 #endif // PLATFORM_WINDOWS
-

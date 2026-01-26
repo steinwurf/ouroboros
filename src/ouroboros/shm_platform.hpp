@@ -24,11 +24,11 @@ inline namespace STEINWURF_OUROBOROS_VERSION
 {
 
 // Expose detail types and functions in the main namespace
-using detail::shm_handle;
 using detail::create_and_map_shm;
 using detail::open_and_map_shm;
-using detail::unmap_shm;
+using detail::shm_handle;
 using detail::unlink_shm;
+using detail::unmap_shm;
 
 }
 }

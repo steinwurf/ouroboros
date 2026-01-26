@@ -67,4 +67,3 @@ void unlink_shm(const std::string& name);
 } // namespace detail
 }
 }
-
