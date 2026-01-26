@@ -262,25 +262,22 @@ public:
 
             // Check if we advanced to the next chunk by reading into it.
             const std::size_t next_chunk_index = m_current_chunk_index + 1;
-            if (next_chunk_index < m_chunk_count &&
-                m_offset == get_chunk_offset(m_buffer, next_chunk_index))
+            if (next_chunk_index < m_chunk_count)
             {
-                VERIFY(is_chunk_committed(m_buffer, next_chunk_index),
-                       "Next chunk is not committed", next_chunk_index);
-                VERIFY(
-                    get_chunk_token(m_buffer, next_chunk_index) >
-                        m_current_chunk_token,
-                    "Next chunk token is not greater than current chunk token",
-                    get_chunk_token(m_buffer, next_chunk_index),
-                    m_current_chunk_token);
-
-                const auto offset_before_jump = m_offset;
-                auto success = jump_to_chunk(next_chunk_index);
-
-                VERIFY(success, "Failed to jump to next chunk");
-                VERIFY(m_offset == offset_before_jump,
-                       "Offset changed after jump", m_offset,
-                       offset_before_jump);
+                const std::size_t next_chunk_offset =
+                    get_chunk_offset(m_buffer, next_chunk_index);
+                if (next_chunk_offset != 0 && m_offset == next_chunk_offset)
+                {
+                    auto success = jump_to_chunk(next_chunk_index);
+                    if (!success)
+                    {
+                        // Failed to jump to the next chunk. Must have been
+                        // invalidated by the writer.
+                        return tl::make_unexpected(make_error_code(
+                            ouroboros::error::no_data_available));
+                    }
+                    continue;
+                }
             }
 
             // Extract payload
@@ -385,10 +382,10 @@ private:
         return detail::buffer_format::is_committed(offset_value);
     }
 
-    static auto
-    find_starting_chunk(std::span<const uint8_t> buffer,
-                        std::size_t chunk_count,
-                        read_strategy strategy) -> std::optional<std::size_t>
+    static auto find_starting_chunk(std::span<const uint8_t> buffer,
+                                    std::size_t chunk_count,
+                                    read_strategy strategy)
+        -> std::optional<std::size_t>
     {
         switch (strategy)
         {
