@@ -62,7 +62,7 @@ else()
     steinwurf::ouroboros)
 
   # Link object dependencies
-  
+
 endif()
 
 # Link header only dependencies
@@ -87,6 +87,11 @@ add_library(steinwurf::ouroboros ALIAS ouroboros)
 if(${CMAKE_PROJECT_NAME} STREQUAL ${PROJECT_NAME})
   # CLI11 dependency is only for toplevel project when building apps
   enable_testing()
+
+  # CLI11 dependency
+  if(NOT TARGET CLI11::CLI11)
+    add_subdirectory("${STEINWURF_RESOLVE}/cli11-source" cli11 EXCLUDE_FROM_ALL)
+  endif()
 
   if(CMAKE_C_COMPILER_ID MATCHES "MSVC")
     # For Windows: Prevent overriding the parent project's compiler/linker
@@ -116,4 +121,50 @@ if(${CMAKE_PROJECT_NAME} STREQUAL ${PROJECT_NAME})
   set_property(TARGET ouroboros_tests PROPERTY CXX_EXTENSIONS OFF)
 
   add_test(ouroboros_tests ouroboros_tests)
+
+  # Build shm_generator tool
+  add_executable(ouroboros_shm_generator tools/shm_generator.cpp)
+  target_link_libraries(ouroboros_shm_generator steinwurf::ouroboros)
+  target_link_libraries(ouroboros_shm_generator steinwurf::platform)
+  target_link_libraries(ouroboros_shm_generator CLI11::CLI11)
+  target_link_libraries(ouroboros_shm_generator steinwurf::verify)
+  target_link_libraries(ouroboros_shm_generator steinwurf::expected)
+  target_include_directories(ouroboros_shm_generator PRIVATE
+    "${STEINWURF_RESOLVE}/cli11-source")
+
+  # Make sure we compile with C++17 and do not use compiler-specific extensions
+  set_property(TARGET ouroboros_shm_generator PROPERTY CXX_STANDARD 17)
+  set_property(TARGET ouroboros_shm_generator PROPERTY CXX_EXTENSIONS OFF)
+
+  # Set output directory to bin/
+  set_target_properties(ouroboros_shm_generator PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
+
+  # Install executable
+  install(TARGETS ouroboros_shm_generator
+    RUNTIME DESTINATION bin
+    COMPONENT tools)
+
+  # Build shm_dumper tool
+  add_executable(ouroboros_shm_dumper tools/shm_dumper.cpp)
+  target_link_libraries(ouroboros_shm_dumper steinwurf::ouroboros)
+  target_link_libraries(ouroboros_shm_dumper steinwurf::platform)
+  target_link_libraries(ouroboros_shm_dumper CLI11::CLI11)
+  target_link_libraries(ouroboros_shm_dumper steinwurf::verify)
+  target_link_libraries(ouroboros_shm_dumper steinwurf::expected)
+  target_include_directories(ouroboros_shm_dumper PRIVATE
+    "${STEINWURF_RESOLVE}/cli11-source")
+
+  # Make sure we compile with C++17 and do not use compiler-specific extensions
+  set_property(TARGET ouroboros_shm_dumper PROPERTY CXX_STANDARD 17)
+  set_property(TARGET ouroboros_shm_dumper PROPERTY CXX_EXTENSIONS OFF)
+
+  # Set output directory to bin/
+  set_target_properties(ouroboros_shm_dumper PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
+
+  # Install executable
+  install(TARGETS ouroboros_shm_dumper
+    RUNTIME DESTINATION bin
+    COMPONENT tools)
 endif()

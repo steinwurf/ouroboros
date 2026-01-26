@@ -11,11 +11,11 @@
 #include <verify/verify.hpp>
 
 #include <cassert>
+#include <climits>
 #include <cstdint>
 #include <cstring>
 #include <optional>
 #include <string_view>
-#include <vector>
 
 #include "detail/atomic.hpp"
 #include "detail/buffer_format.hpp"
@@ -47,7 +47,8 @@ public:
     enum class read_strategy
     {
         auto_detect,
-        from_latest
+        from_latest,
+        from_lowest
     };
 
     struct entry
@@ -398,6 +399,8 @@ private:
             [[fallthrough]];
         case read_strategy::from_latest:
             return find_chunk_with_highest_token(buffer, chunk_count);
+        case read_strategy::from_lowest:
+            return find_chunk_with_lowest_token(buffer, chunk_count);
         }
         return {};
     }
@@ -418,6 +421,31 @@ private:
 
             const uint64_t token = get_chunk_token(buffer, i);
             if (token > best_token)
+            {
+                best_token = token;
+                best_chunk = i;
+            }
+        }
+
+        return best_chunk;
+    }
+
+    static auto find_chunk_with_lowest_token(std::span<const uint8_t> buffer,
+                                             std::size_t chunk_count)
+        -> std::optional<std::size_t>
+    {
+        std::optional<std::size_t> best_chunk = {};
+        uint64_t best_token = std::numeric_limits<uint64_t>::max();
+
+        for (std::size_t i = 0; i < chunk_count; ++i)
+        {
+            if (!is_chunk_committed(buffer, i))
+            {
+                continue;
+            }
+
+            const uint64_t token = get_chunk_token(buffer, i);
+            if (token < best_token)
             {
                 best_token = token;
                 best_chunk = i;

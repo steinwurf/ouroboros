@@ -1,4 +1,10 @@
 {
+    "cli11-source": {
+        "commit_id": "f862849488557eeee0397814a47449ecfdae0383",
+        "resolver_info": "f862849488557eeee0397814a47449ecfdae0383",
+        "sha1": "c907ae8559530944e520e22d1382be32d290ca77",
+        "source": "github.com:CLIUtils/CLI11.git"
+    },
     "expected": {
         "commit_id": "e84368a61a223dd0fb3ad60d6e6791a3ffc199f7",
         "resolver_info": "2.0.0",
