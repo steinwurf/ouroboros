@@ -3,6 +3,7 @@
 
 import os
 import hashlib
+import platform
 
 from waflib.Build import BuildContext
 
@@ -64,22 +65,18 @@ class PythonTestContext(BuildContext):
 def python_test(ctx):
 
     binary_name = "ouroboros_shm_generator"
-    if ctx.env.PLATFORM == "windows":
-        # Windows binaries have a .exe extension and is placed in a directory named Debug or Release
-        binary_name = "ouroboros_shm_generator.exe"
-        if ctx.env.CMAKE_BUILD_TYPE == "Debug":
-            binary_name = os.path.join("Debug", binary_name)
-        elif ctx.env.CMAKE_BUILD_TYPE == "Release":
-            binary_name = os.path.join("Release", binary_name)
 
-    # if macos, the binary is placed in a directory named Debug or Release
-    if ctx.env.PLATFORM == "macos":
-        if ctx.env.CMAKE_BUILD_TYPE == "Debug":
-            binary_name = os.path.join("Debug", binary_name)
-        elif ctx.env.CMAKE_BUILD_TYPE == "Release":
-            binary_name = os.path.join("Release", binary_name)
+    if platform.system() == "Linux":
+        shm_generator = os.path.join(ctx.env.CMAKE_BUILD_DIR, "bin", binary_name)
+    elif platform.system() == "Windows":
+        shm_generator = os.path.join(
+            ctx.env.CMAKE_BUILD_DIR, "bin", binary_name + ".exe"
+        )
+    elif platform.system() == "Darwin":
+        shm_generator = os.path.join("build", ctx.env.CMAKE_BUILD_TYPE, binary_name)
+    else:
+        ctx.fatal("Unsupported platform: {}".format(platform.system()))
 
-    shm_generator = os.path.join(ctx.env.CMAKE_BUILD_DIR, "bin", binary_name)
     if not os.path.exists(shm_generator):
         ctx.fatal(
             "Cannot find ouroboros_shm_generator binary in {}, did you run "
