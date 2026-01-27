@@ -48,7 +48,8 @@ auto main(int argc, char* argv[]) -> int
     std::ofstream out_file(output_file);
     if (!out_file.is_open())
     {
-        std::cerr << "Error: Failed to open output file: " << output_file << "\n";
+        std::cerr << "Error: Failed to open output file: " << output_file
+                  << "\n";
         return 1;
     }
 
