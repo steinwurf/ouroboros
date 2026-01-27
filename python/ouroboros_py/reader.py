@@ -1,13 +1,16 @@
 """Pure-Python implementation of Ouroboros shared-memory log reader."""
 
+import logging
 import struct
 import sys
-from typing import Iterator, List, Optional
+from typing import Iterator, List, Optional, Union
 
 try:
     from multiprocessing import shared_memory
 except ImportError:
     shared_memory = None  # type: ignore
+
+log = logging.getLogger(__name__)
 
 # Buffer format constants (matching C++ buffer_format.hpp)
 MAGIC = 0x4F55524F424C4F47  # "OUROBLOG"
@@ -73,14 +76,14 @@ def _align_up(size: int, align: int) -> int:
     return (size + align - 1) & ~(align - 1)
 
 
-def _load_acquire_u32(data: bytes, offset: int) -> int:
+def _load_acquire_u32(data: Union[bytes, memoryview], offset: int) -> int:
     """Load uint32_t with acquire semantics (read barrier)."""
     # On x86/x64, regular loads are naturally acquire-ordered
     # We use struct.unpack which should preserve ordering
     return struct.unpack("<I", data[offset : offset + 4])[0]
 
 
-def _load_acquire_u64(data: bytes, offset: int) -> int:
+def _load_acquire_u64(data: Union[bytes, memoryview], offset: int) -> int:
     """Load uint64_t with acquire semantics (read barrier)."""
     # On x86/x64, regular loads are naturally acquire-ordered
     # We use struct.unpack which should preserve ordering
@@ -107,7 +110,7 @@ class Reader:
 
         self._name = name
         self._shm: Optional[shared_memory.SharedMemory] = None
-        self._buffer: Optional[bytes] = None
+        self._buffer: Optional[Union[bytes, memoryview]] = None
         self._chunk_count = 0
         self._current_chunk_index = 0
         self._current_chunk_token = 0
@@ -115,22 +118,37 @@ class Reader:
         self._total_entries_read = 0
         self._entries_read_in_current_chunk = 0
 
+        log.debug("Creating Reader for shared memory '%s'", self._name)
         self._attach()
 
     def _attach(self) -> None:
         """Attach to the shared memory segment and validate the buffer."""
         try:
             self._shm = shared_memory.SharedMemory(name=self._name, create=False)
-            self._buffer = bytes(self._shm.buf)
+            # Use live buffer (memoryview), not a snapshot; bytes() would copy once
+            # and we would never see entries written by the generator after attach.
+            self._buffer = self._shm.buf
         except FileNotFoundError:
+            log.error(
+                "Shared memory segment '%s' not found when attaching Reader",
+                self._name,
+            )
             raise ReaderError(
                 f"Shared memory segment '{self._name}' not found. "
                 "Make sure the writer has created it."
             )
         except Exception as e:
+            log.exception(
+                "Failed to attach Reader to shared memory '%s': %s",
+                self._name,
+                e,
+            )
             raise ReaderError(f"Failed to attach to shared memory: {e}")
 
         if not self._is_ready():
+            log.error(
+                "Buffer for shared memory '%s' has invalid magic header", self._name
+            )
             raise InvalidMagicError("Buffer magic value does not match")
 
         # Validate version
@@ -159,6 +177,15 @@ class Reader:
 
         if not self._jump_to_chunk(starting_chunk):
             raise NoDataAvailableError("Failed to jump to starting chunk")
+
+        log.info(
+            "Reader attached to shm '%s': size=%d bytes, chunks=%d, "
+            "start_chunk=%d",
+            self._name,
+            len(self._buffer),
+            self._chunk_count,
+            starting_chunk,
+        )
 
     def _is_ready(self) -> bool:
         """Check if the buffer is ready (magic bytes match)."""
@@ -263,8 +290,13 @@ class Reader:
         while True:
             # Implicit wrap: no room for header
             if self._offset + ENTRY_HEADER_SIZE > len(self._buffer):
-                # Jump to the first chunk
+                log.debug(
+                    "_read_next_entry: wrap at offset=%d (buf_len=%d), jump chunk 0",
+                    self._offset,
+                    len(self._buffer),
+                )
                 if not self._jump_to_chunk(0):
+                    log.debug("_read_next_entry: jump_to_chunk(0) failed, returning None")
                     return None
                 continue
 
@@ -277,18 +309,27 @@ class Reader:
                 or self._current_chunk_token
                 != self._get_chunk_token(self._current_chunk_index)
             ):
-                # Chunk was invalidated, jump to latest chunk
+                log.debug(
+                    "_read_next_entry: chunk %d invalidated (token stale), jump latest",
+                    self._current_chunk_index,
+                )
                 latest = self._find_chunk_with_highest_token()
                 if latest is None:
+                    log.debug("_read_next_entry: no chunk with highest token, None")
                     return None
 
                 if not self._jump_to_chunk(latest):
+                    log.debug("_read_next_entry: jump_to_chunk(%d) failed, None", latest)
                     return None
                 continue
 
             # Check if the entry is committed
             if not _is_committed(length_with_flag, bits=32):
-                # Entry is not committed
+                log.debug(
+                    "_read_next_entry: offset=%d length_with_flag=0x%x not committed",
+                    self._offset,
+                    length_with_flag,
+                )
                 return None
 
             # Clear the commit flag and get the length
@@ -296,12 +337,13 @@ class Reader:
 
             # Check if the entry length is valid
             if length == 0:
-                # Entry not yet written
+                log.debug("_read_next_entry: offset=%d length=0 (not written yet)", self._offset)
                 return None
 
             if length == 1:
-                # Writer has wrapped the buffer, jump to first chunk
+                log.debug("_read_next_entry: offset=%d length=1 (writer wrap), jump chunk 0", self._offset)
                 if not self._jump_to_chunk(0):
+                    log.debug("_read_next_entry: jump_to_chunk(0) failed, None")
                     return None
                 continue
 
@@ -323,6 +365,10 @@ class Reader:
             if next_chunk_index < self._chunk_count:
                 next_chunk_offset = self._get_chunk_offset(next_chunk_index)
                 if next_chunk_offset != 0 and self._offset == next_chunk_offset:
+                    log.debug(
+                        "_read_next_entry: at chunk boundary, jump chunk %d",
+                        next_chunk_index,
+                    )
                     if not self._jump_to_chunk(next_chunk_index):
                         return None
                     continue
@@ -340,7 +386,29 @@ class Reader:
             self._total_entries_read += 1
             self._entries_read_in_current_chunk += 1
 
+            log.debug(
+                "_read_next_entry: read payload chunk=%d offset_was=%d len=%d "
+                "payload_size=%d total_read=%d",
+                self._current_chunk_index,
+                payload_start - ENTRY_HEADER_SIZE,
+                length,
+                payload_size,
+                self._total_entries_read,
+            )
             return payload
+
+    def read_next(self) -> Optional[bytes]:
+        """Read the next available entry, if any.
+
+        Returns one payload or None when no data is available yet (or when
+        all data has been read). Use this for real-time reading: poll in a
+        loop, collect payloads, and stop when you have enough or the writer
+        has finished.
+
+        Returns:
+            Payload bytes for the next entry, or None if no entry is available.
+        """
+        return self._read_next_entry()
 
     def read_all(self) -> List[bytes]:
         """Read all available entries from the log.
@@ -351,12 +419,18 @@ class Reader:
         Raises:
             ReaderError: If reading fails
         """
+        log.debug("read_all() called on Reader for shm '%s'", self._name)
         entries = []
         while True:
             entry = self._read_next_entry()
             if entry is None:
                 break
             entries.append(entry)
+        log.info(
+            "read_all() completed on shm '%s': %d entries",
+            self._name,
+            len(entries),
+        )
         return entries
 
     def __iter__(self) -> Iterator[bytes]:
@@ -382,6 +456,7 @@ class Reader:
     def close(self) -> None:
         """Close the shared memory connection."""
         if self._shm is not None:
+            log.debug("Closing Reader for shm '%s'", self._name)
             self._shm.close()
             self._shm = None
             self._buffer = None

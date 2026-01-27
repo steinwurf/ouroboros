@@ -1,6 +1,11 @@
 #! /usr/bin/env python
 # encoding: utf-8
 
+import os
+import hashlib
+
+from waflib.Build import BuildContext
+
 
 APPNAME = "ouroboros"
 VERSION = "0.0.0"
@@ -8,6 +13,16 @@ VERSION = "0.0.0"
 
 def options(ctx):
     ctx.load("cmake")
+
+    if ctx.is_toplevel():
+        # Add option for filtering the python tests
+        ctx.add_option(
+            "--python-test-filter",
+            action="store",
+            default="",
+            help="Filter the python tests to run",
+        )
+
 
 def configure(ctx):
     ctx.load("cmake")
@@ -21,6 +36,7 @@ def build(ctx):
     ctx.load("cmake")
     if ctx.is_toplevel():
         ctx.cmake_build()
+
 
 def prepare_release(ctx):
     """Prepare a release."""
@@ -39,3 +55,56 @@ def prepare_release(ctx):
 
         f.regex_replace(pattern=pattern, replacement=replacement)
 
+
+class PythonTestContext(BuildContext):
+    cmd = "python_test"
+    fun = "python_test"
+
+
+def python_test(ctx):
+    shm_generator = os.path.join(
+        ctx.env.CMAKE_BUILD_DIR, "bin", "ouroboros_shm_generator"
+    )
+    if not os.path.exists(shm_generator):
+        ctx.fatal(
+            "Cannot find ouroboros_shm_generator binary in {}, did you run "
+            "'waf build'?".format(shm_generator)
+        )
+
+    _, venv = _create_venv(ctx=ctx)
+
+    cmd_options = ""
+    if ctx.options.python_test_filter:
+        cmd_options += f"-k '{ctx.options.python_test_filter}'"
+
+    venv.run(
+        f"OUROBOROS_SHM_GENERATOR={shm_generator} pytest python/tests {cmd_options}"
+    )
+
+
+def _create_venv(ctx):
+    """Create a venv with the Python package and test dependencies.
+
+    Uses python/pyproject.toml; installs the package in editable mode with
+    the [test] extras (pytest). The venv is recreated when pyproject.toml
+    changes.
+    """
+    root = ctx.path.abspath()
+    pyproject = os.path.join(root, "python", "pyproject.toml")
+    if not os.path.isfile(pyproject):
+        ctx.fatal("python/pyproject.toml not found")
+
+    with open(pyproject, "r") as f:
+        pyproject_sha1 = hashlib.sha1(f.read().encode("utf-8")).hexdigest()[:8]
+
+    name = "venv-python-{}".format(pyproject_sha1)
+    exists = os.path.isdir(name)
+
+    venv = ctx.create_virtualenv(name=name, overwrite=False)
+
+    if not exists:
+        venv.env["PIP_IGNORE_INSTALLED"] = ""
+        python_dir = os.path.join(root, "python")
+        venv.run('python -m pip install -e "{}[test]"'.format(python_dir))
+
+    return exists, venv

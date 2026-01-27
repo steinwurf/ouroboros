@@ -57,6 +57,16 @@ Creates a reader that attaches to the shared memory segment with the given name.
 
 ### Methods
 
+#### `read_next() -> Optional[bytes]`
+
+Read the next available entry, if any. Returns one payload or `None` when no
+data is available yet (or when all data has been read). Use this for
+**real-time reading**: poll in a loop, collect payloads, and stop when you
+have enough or the writer has finished.
+
+**Returns:**
+- Payload bytes for the next entry, or `None` if no entry is available
+
 #### `read_all() -> List[bytes]`
 
 Read all available entries from the log.
