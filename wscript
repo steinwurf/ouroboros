@@ -130,6 +130,9 @@ def _create_venv(ctx):
     if not exists:
         venv.env["PIP_IGNORE_INSTALLED"] = ""
         python_dir = os.path.join(root, "python")
+        # Upgrade pip/setuptools so editable install from pyproject.toml works
+        # (PEP 660); macOS CLI tools and other environments often ship old pip.
+        venv.run("python -m pip install --upgrade pip setuptools wheel")
         venv.run('python -m pip install -e "{}[test]"'.format(python_dir))
 
     return exists, venv
