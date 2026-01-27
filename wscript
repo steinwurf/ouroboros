@@ -62,9 +62,12 @@ class PythonTestContext(BuildContext):
 
 
 def python_test(ctx):
-    shm_generator = os.path.join(
-        ctx.env.CMAKE_BUILD_DIR, "bin", "ouroboros_shm_generator"
-    )
+
+    binary_name = "ouroboros_shm_generator"
+    if ctx.env.PLATFORM == "windows":
+        binary_name = "ouroboros_shm_generator.exe"
+
+    shm_generator = os.path.join(ctx.env.CMAKE_BUILD_DIR, "bin", binary_name)
     if not os.path.exists(shm_generator):
         ctx.fatal(
             "Cannot find ouroboros_shm_generator binary in {}, did you run "
