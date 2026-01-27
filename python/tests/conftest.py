@@ -52,7 +52,9 @@ def find_generator_executable() -> pathlib.Path:
     return path.resolve()
 
 
-def wait_for_shm(shm_name: str, timeout_sec: float = 5.0, poll_interval: float = 0.05) -> None:
+def wait_for_shm(
+    shm_name: str, timeout_sec: float = 5.0, poll_interval: float = 0.05
+) -> None:
     """Poll until the shared memory segment exists or raise TimeoutError."""
     from multiprocessing import shared_memory
 
@@ -65,7 +67,9 @@ def wait_for_shm(shm_name: str, timeout_sec: float = 5.0, poll_interval: float =
         except FileNotFoundError:
             time.sleep(poll_interval)
     raise TimeoutError(
-        "Shared memory segment '{}' did not appear within {}s".format(shm_name, timeout_sec)
+        "Shared memory segment '{}' did not appear within {}s".format(
+            shm_name, timeout_sec
+        )
     )
 
 
@@ -85,15 +89,24 @@ def start_generator_async(
         json_path = pathlib.Path(f.name)
     cmd = [
         str(exe),
-        "--name", shm_name,
-        "--size", str(buffer_size),
-        "--count", str(record_count),
-        "--min-size", str(min_payload_size),
-        "--max-size", str(max_payload_size),
-        "--seed", str(seed),
-        "--interval", str(interval_us),
-        "--initial-delay", str(initial_delay_us),
-        "--json-out", str(json_path),
+        "--name",
+        shm_name,
+        "--size",
+        str(buffer_size),
+        "--count",
+        str(record_count),
+        "--min-size",
+        str(min_payload_size),
+        "--max-size",
+        str(max_payload_size),
+        "--seed",
+        str(seed),
+        "--interval",
+        str(interval_us),
+        "--initial-delay",
+        str(initial_delay_us),
+        "--json-out",
+        str(json_path),
         "--no-unlink-at-exit",
     ]
     proc = subprocess.Popen(
@@ -220,10 +233,8 @@ def assert_payloads():
 # ---- Fixtures ----
 
 
-# macOS shm_open() allows at most 31 characters (including leading '/').
-# Keep total length <= 31 so tests work on Darwin (Linux allows longer names).
-_SHM_NAME_PREFIX = "/ouro_test_"
-_SHM_NAME_MAX_LEN = 31
+_SHM_NAME_PREFIX = "ouro_test_"
+_SHM_NAME_MAX_LEN = 30
 
 
 @pytest.fixture
