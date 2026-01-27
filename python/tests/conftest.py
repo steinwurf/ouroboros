@@ -233,7 +233,7 @@ def assert_payloads():
 # ---- Fixtures ----
 
 
-_SHM_NAME_PREFIX = "ouro_test_"
+_SHM_NAME_PREFIX = "/ouro_test_"
 _SHM_NAME_MAX_LEN = 30
 
 
