@@ -220,10 +220,17 @@ def assert_payloads():
 # ---- Fixtures ----
 
 
+# macOS shm_open() allows at most 31 characters (including leading '/').
+# Keep total length <= 31 so tests work on Darwin (Linux allows longer names).
+_SHM_NAME_PREFIX = "/ouro_test_"
+_SHM_NAME_MAX_LEN = 31
+
+
 @pytest.fixture
 def unique_shm_name():
     """Unique shared memory name per test; cleanup on teardown."""
-    name = "/ouroboros_test_{}".format(uuid.uuid4().hex[:16])
+    hex_len = _SHM_NAME_MAX_LEN - len(_SHM_NAME_PREFIX)
+    name = "{}{}".format(_SHM_NAME_PREFIX, uuid.uuid4().hex[:hex_len])
     yield name
     cleanup_shm(name)
 
