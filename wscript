@@ -70,10 +70,18 @@ def python_test(ctx):
         shm_generator = os.path.join(ctx.env.CMAKE_BUILD_DIR, "bin", binary_name)
     elif platform.system() == "Windows":
         shm_generator = os.path.join(
-            ctx.env.CMAKE_BUILD_DIR, "bin", binary_name + ".exe"
+            ctx.env.CMAKE_BUILD_DIR,
+            "bin",
+            ctx.env.CMAKE_BUILD_TYPE,
+            binary_name + ".exe",
         )
     elif platform.system() == "Darwin":
-        shm_generator = os.path.join("build", ctx.env.CMAKE_BUILD_TYPE, binary_name)
+        shm_generator = os.path.join(
+            ctx.env.CMAKE_BUILD_DIR,
+            "bin",
+            ctx.env.CMAKE_BUILD_TYPE,
+            binary_name,
+        )
     else:
         ctx.fatal("Unsupported platform: {}".format(platform.system()))
 
