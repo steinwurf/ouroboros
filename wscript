@@ -80,7 +80,6 @@ def python_test(ctx):
         shm_generator = os.path.join(
             ctx.env.CMAKE_BUILD_DIR,
             "bin",
-            ctx.env.CMAKE_BUILD_TYPE,
             binary_name,
         )
     else:
