@@ -65,7 +65,19 @@ def python_test(ctx):
 
     binary_name = "ouroboros_shm_generator"
     if ctx.env.PLATFORM == "windows":
+        # Windows binaries have a .exe extension and is placed in a directory named Debug or Release
         binary_name = "ouroboros_shm_generator.exe"
+        if ctx.env.BUILD_TYPE == "Debug":
+            binary_name = os.path.join("Debug", binary_name)
+        elif ctx.env.BUILD_TYPE == "Release":
+            binary_name = os.path.join("Release", binary_name)
+
+    # if macos, the binary is placed in a directory named Debug or Release
+    if ctx.env.PLATFORM == "macos":
+        if ctx.env.BUILD_TYPE == "Debug":
+            binary_name = os.path.join("Debug", binary_name)
+        elif ctx.env.BUILD_TYPE == "Release":
+            binary_name = os.path.join("Release", binary_name)
 
     shm_generator = os.path.join(ctx.env.CMAKE_BUILD_DIR, "bin", binary_name)
     if not os.path.exists(shm_generator):
