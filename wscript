@@ -4,6 +4,7 @@
 import os
 import hashlib
 import platform
+import shlex
 
 from waflib.Build import BuildContext
 
@@ -93,13 +94,18 @@ def python_test(ctx):
 
     _, venv = _create_venv(ctx=ctx)
 
-    cmd_options = ""
-    if ctx.options.python_test_filter:
-        cmd_options += f"-k '{ctx.options.python_test_filter}'"
+    # Pass generator path via pytest option (works on Windows; VAR=value is Unix-only)
+    def _shell_quote(s):
+        if platform.system() == "Windows":
+            return '"' + s.replace('"', '\\"') + '"' if (" " in s or '"' in s) else s
+        return shlex.quote(s)
 
-    venv.run(
-        f"OUROBOROS_SHM_GENERATOR={shm_generator} pytest python/tests {cmd_options}"
-    )
+    gen_opt = _shell_quote(shm_generator)
+    cmd_parts = ["pytest", "python/tests", "--ouroboros-shm-generator=" + gen_opt]
+    if ctx.options.python_test_filter:
+        cmd_parts.append("-k")
+        cmd_parts.append(_shell_quote(ctx.options.python_test_filter))
+    venv.run(" ".join(cmd_parts))
 
 
 def _create_venv(ctx):

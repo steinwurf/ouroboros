@@ -15,6 +15,25 @@ from ouroboros_py import Reader
 
 log = logging.getLogger(__name__)
 
+
+def pytest_addoption(parser):
+    """Add --ouroboros-shm-generator so waf/CI can pass the generator path without env."""
+    parser.addoption(
+        "--ouroboros-shm-generator",
+        action="store",
+        default=None,
+        metavar="PATH",
+        help="Path to ouroboros_shm_generator (overrides OUROBOROS_SHM_GENERATOR)",
+    )
+
+
+def pytest_configure(config):
+    """If --ouroboros-shm-generator was given, set env for find_generator_executable()."""
+    path = config.getoption("ouroboros_shm_generator", default=None)
+    if path is not None:
+        os.environ["OUROBOROS_SHM_GENERATOR"] = str(path)
+
+
 # ---- Generator / reader helpers (used by fixtures and tests) ----
 
 _GENERATOR_INITIAL_DELAY_US = 500_000  # 0.5s for reader to attach before first write

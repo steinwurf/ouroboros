@@ -97,13 +97,17 @@ Get the number of chunks in the buffer.
 
 ## Testing
 
-Tests require the `ouroboros_shm_generator` executable to be available. Set the `OUROBOROS_SHM_GENERATOR` environment variable to point to the executable, or it will be searched in common build paths.
+Tests require the `ouroboros_shm_generator` executable to be available. Either set the `OUROBOROS_SHM_GENERATOR` environment variable, or pass it via pytest:
 
 ```bash
 # Install test dependencies
 pip install -e ".[test]"
 
-# Run tests
+# Run tests (generator path via option; works on Windows and Unix)
+pytest --ouroboros-shm-generator=/path/to/ouroboros_shm_generator
+
+# Or use the env var
+export OUROBOROS_SHM_GENERATOR=/path/to/ouroboros_shm_generator
 pytest
 ```
 
