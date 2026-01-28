@@ -383,10 +383,10 @@ private:
         return detail::buffer_format::is_committed(offset_value);
     }
 
-    static auto find_starting_chunk(std::span<const uint8_t> buffer,
-                                    std::size_t chunk_count,
-                                    read_strategy strategy)
-        -> std::optional<std::size_t>
+    static auto
+    find_starting_chunk(std::span<const uint8_t> buffer,
+                        std::size_t chunk_count,
+                        read_strategy strategy) -> std::optional<std::size_t>
     {
         switch (strategy)
         {

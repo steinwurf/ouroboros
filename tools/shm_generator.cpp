@@ -143,7 +143,7 @@ auto main(int argc, char* argv[]) -> int
     app.add_option("--name", shm_name, "Shared memory name")->required();
     app.add_option("--size", buffer_size, "Shared memory size in bytes")
         ->required()
-        ->check(CLI::PositiveNumber);
+        ->check(CLI::NonNegativeNumber);
     app.add_option("--count", record_count, "Number of records to generate")
         ->required()
         ->check(CLI::PositiveNumber);
@@ -166,8 +166,12 @@ auto main(int argc, char* argv[]) -> int
     app.add_option("--json-out", json_output_path,
                    "JSON output file path describing all records")
         ->required();
+    bool no_unlink_at_exit = false;
     app.add_flag("--unlink-at-exit", unlink_at_exit,
                  "Unlink shared memory segment on exit (default: true)");
+    app.add_flag("--no-unlink-at-exit", no_unlink_at_exit,
+                 "Keep shared memory segment after exit (for readers)")
+        ->excludes("--unlink-at-exit");
 
     try
     {
@@ -177,6 +181,11 @@ auto main(int argc, char* argv[]) -> int
     {
         std::cerr << app.help() << "\n";
         return app.exit(e);
+    }
+
+    if (no_unlink_at_exit)
+    {
+        unlink_at_exit = false;
     }
 
     if (min_payload_size > max_payload_size)

@@ -1,0 +1,74 @@
+name: Python Tests
+
+on:
+  push:
+    branches:
+      - master
+  pull_request:
+    branches:
+      - master
+
+jobs:
+  linux:
+    timeout-minutes: 45
+    runs-on: [self-hosted, vm, ubuntu-current]
+    name: Linux
+    steps:
+      - name: Ensure correct owner of repository
+        run: sudo chown -R actions-runner:actions-runner .
+      - name: Checkout source code
+        uses: actions/checkout@v3
+      - name: Waf Configure
+        run: python3 waf configure --git_protocol=git@ --cmake_toolchain=./resolve_symlinks/toolchains/gcc-toolchain.cmake --cmake_verbose
+      - name: Waf Build
+        run: python3 waf build
+      - name: Waf Python Test
+        run: python3 waf python_test
+
+  macos:
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        config:
+          - arch: ARM64
+            os: big_sur
+            name: macOS Big Sur (ARM)
+            toolchain: "./resolve_symlinks/toolchains/clang-toolchain.cmake"
+    runs-on:
+      - self-hosted
+      - macOS
+      - ${{ matrix.config.os }}
+      - ${{ matrix.config.arch }}
+      - cmake
+      - builder
+    name: ${{ matrix.config.name }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+      - name: Waf Configure
+        run: python3 waf configure --git_protocol=git@ --cmake_toolchain=${{ matrix.config.toolchain }} --cmake_verbose
+      - name: Waf Build
+        run: python3 waf build
+      - name: Waf Python Test
+        run: python3 waf python_test
+
+  windows:
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+    runs-on: [self-hosted, windows, vm, windows-current]
+    name: Windows
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+      - name: Waf Configure
+        run: python waf configure --git_protocol=git@ --cmake_verbose
+      - name: Waf Build
+        run: python waf build
+      - name: Waf Python Test
+        run: python waf python_test
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref || github.run_id }}
+  cancel-in-progress: true
