@@ -57,6 +57,11 @@ def prepare_release(ctx):
 
         f.regex_replace(pattern=pattern, replacement=replacement)
 
+    with ctx.rewrite_file(filename="python/pyproject.toml") as f:
+        pattern = r'version = "\d+\.\d+\.\d+"'
+        replacement = 'version = "{}"'.format(VERSION)
+        f.regex_replace(pattern=pattern, replacement=replacement)
+
 
 class PythonTestContext(BuildContext):
     cmd = "python_test"

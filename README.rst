@@ -79,6 +79,17 @@ Building 🏗️
     python3 waf configure
     python3 waf build
 
+Installing the Python reader 🐍
+--------------------------------
+
+To install the pure-Python shared-memory log reader from this repository:
+
+.. code-block:: bash
+
+    python3 -m pip install "git+ssh://git@github.com/steinwurf/ouroboros.git#subdirectory=python"
+
+See the `python/README.md <python/README.md>`_ for usage and API details.
+
 Requirements 📦
 ---------------
 
