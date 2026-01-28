@@ -58,6 +58,8 @@ def wait_for_shm(
     """Poll until the shared memory segment exists or raise TimeoutError."""
     from multiprocessing import shared_memory
 
+    if os.name != "nt":
+        shm_name = shm_name.lstrip("/")
     deadline = time.monotonic() + timeout_sec
     while time.monotonic() < deadline:
         try:

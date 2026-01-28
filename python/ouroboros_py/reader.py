@@ -1,6 +1,7 @@
 """Pure-Python implementation of Ouroboros shared-memory log reader."""
 
 import logging
+import os
 import struct
 import sys
 from typing import Iterator, List, Optional, Union
@@ -124,18 +125,21 @@ class Reader:
     def _attach(self) -> None:
         """Attach to the shared memory segment and validate the buffer."""
         try:
+            name = self._name
+            if os.name != "nt":
+                name = name.lstrip("/")
             self._shm = shared_memory.SharedMemory(name=self._name, create=False)
             # Use live buffer (memoryview), not a snapshot; bytes() would copy once
             # and we would never see entries written by the generator after attach.
             self._buffer = self._shm.buf
-        except FileNotFoundError:
+        except FileNotFoundError as e:
             log.error(
                 "Shared memory segment '%s' not found when attaching Reader",
                 self._name,
             )
             raise ReaderError(
                 f"Shared memory segment '{self._name}' not found. "
-                "Make sure the writer has created it."
+                f"Make sure the writer has created it. {e}"
             )
         except Exception as e:
             log.exception(
@@ -179,8 +183,7 @@ class Reader:
             raise NoDataAvailableError("Failed to jump to starting chunk")
 
         log.info(
-            "Reader attached to shm '%s': size=%d bytes, chunks=%d, "
-            "start_chunk=%d",
+            "Reader attached to shm '%s': size=%d bytes, chunks=%d, " "start_chunk=%d",
             self._name,
             len(self._buffer),
             self._chunk_count,
@@ -296,7 +299,9 @@ class Reader:
                     len(self._buffer),
                 )
                 if not self._jump_to_chunk(0):
-                    log.debug("_read_next_entry: jump_to_chunk(0) failed, returning None")
+                    log.debug(
+                        "_read_next_entry: jump_to_chunk(0) failed, returning None"
+                    )
                     return None
                 continue
 
@@ -304,10 +309,10 @@ class Reader:
             length_with_flag = _load_acquire_u32(self._buffer, self._offset)
 
             # Check if the read was valid by checking the chunk token
-            if (
-                not self._is_chunk_committed(self._current_chunk_index)
-                or self._current_chunk_token
-                != self._get_chunk_token(self._current_chunk_index)
+            if not self._is_chunk_committed(
+                self._current_chunk_index
+            ) or self._current_chunk_token != self._get_chunk_token(
+                self._current_chunk_index
             ):
                 log.debug(
                     "_read_next_entry: chunk %d invalidated (token stale), jump latest",
@@ -319,7 +324,9 @@ class Reader:
                     return None
 
                 if not self._jump_to_chunk(latest):
-                    log.debug("_read_next_entry: jump_to_chunk(%d) failed, None", latest)
+                    log.debug(
+                        "_read_next_entry: jump_to_chunk(%d) failed, None", latest
+                    )
                     return None
                 continue
 
@@ -337,11 +344,17 @@ class Reader:
 
             # Check if the entry length is valid
             if length == 0:
-                log.debug("_read_next_entry: offset=%d length=0 (not written yet)", self._offset)
+                log.debug(
+                    "_read_next_entry: offset=%d length=0 (not written yet)",
+                    self._offset,
+                )
                 return None
 
             if length == 1:
-                log.debug("_read_next_entry: offset=%d length=1 (writer wrap), jump chunk 0", self._offset)
+                log.debug(
+                    "_read_next_entry: offset=%d length=1 (writer wrap), jump chunk 0",
+                    self._offset,
+                )
                 if not self._jump_to_chunk(0):
                     log.debug("_read_next_entry: jump_to_chunk(0) failed, None")
                     return None
@@ -376,9 +389,7 @@ class Reader:
             # Extract payload
             payload_size = length - ENTRY_HEADER_SIZE
             payload_start = self._offset + ENTRY_HEADER_SIZE
-            payload = bytes(
-                self._buffer[payload_start : payload_start + payload_size]
-            )
+            payload = bytes(self._buffer[payload_start : payload_start + payload_size])
 
             # Advance offset
             self._offset += length
