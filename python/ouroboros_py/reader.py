@@ -128,19 +128,16 @@ class Reader:
             name = self._name
             if os.name != "nt":
                 name = name.lstrip("/")
-            self._shm = shared_memory.SharedMemory(name=self._name, create=False)
+            self._shm = shared_memory.SharedMemory(name=name, create=False)
             # Use live buffer (memoryview), not a snapshot; bytes() would copy once
             # and we would never see entries written by the generator after attach.
             self._buffer = self._shm.buf
         except FileNotFoundError as e:
-            log.error(
-                "Shared memory segment '%s' not found when attaching Reader",
-                self._name,
+            error_msg = (
+                f"Shared memory segment {e.filename} not found when attaching Reader"
             )
-            raise ReaderError(
-                f"Shared memory segment '{self._name}' not found. "
-                f"Make sure the writer has created it. {e}"
-            )
+            log.error(error_msg)
+            raise ReaderError(error_msg)
         except Exception as e:
             log.exception(
                 "Failed to attach Reader to shared memory '%s': %s",
