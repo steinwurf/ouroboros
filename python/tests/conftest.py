@@ -1,6 +1,7 @@
 """Pytest configuration and fixtures for ouroboros_py tests."""
 
 import json
+from typing import Union
 import logging
 import os
 import pathlib
@@ -263,7 +264,7 @@ def run_generator_and_reader_entries(
     interval_us: int = 0,
     initial_delay_us: int = _GENERATOR_INITIAL_DELAY_US,
     validate_entries: bool = False,
-) -> tuple[list, dict] | tuple[list, dict, list[bool]]:
+) -> Union[tuple[list, dict], tuple[list, dict, list[bool]]]:
     """
     Like run_generator_and_reader but returns (entries, expected_data) where
     entries are Entry objects. If validate_entries=True, also returns
