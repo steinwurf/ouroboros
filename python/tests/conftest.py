@@ -132,14 +132,58 @@ def read_realtime(
     payloads = []
     deadline = time.monotonic() + timeout_sec
     while len(payloads) < record_count and time.monotonic() < deadline:
-        entry = reader.read_next()
+        entry = reader.read_next_entry()
         if entry is not None:
-            payloads.append(entry)
+            payloads.append(entry.data)
         else:
             if proc.poll() is not None:
                 break
             time.sleep(poll_interval_sec)
     return payloads
+
+
+def read_realtime_entries(
+    reader: Reader,
+    record_count: int,
+    proc: subprocess.Popen,
+    timeout_sec: float = 30.0,
+    poll_interval_sec: float = 0.001,
+) -> list:
+    """Read entries in real time until record_count or generator exits. Returns list of Entry."""
+    entries = []
+    deadline = time.monotonic() + timeout_sec
+    while len(entries) < record_count and time.monotonic() < deadline:
+        entry = reader.read_next_entry()
+        if entry is not None:
+            entries.append(entry)
+        else:
+            if proc.poll() is not None:
+                break
+            time.sleep(poll_interval_sec)
+    return entries
+
+
+def read_realtime_entries_with_validation(
+    reader: Reader,
+    record_count: int,
+    proc: subprocess.Popen,
+    timeout_sec: float = 30.0,
+    poll_interval_sec: float = 0.001,
+) -> tuple[list, list[bool]]:
+    """Like read_realtime_entries but also returns is_valid() for each entry (while reader open)."""
+    entries = []
+    valid_flags = []
+    deadline = time.monotonic() + timeout_sec
+    while len(entries) < record_count and time.monotonic() < deadline:
+        entry = reader.read_next_entry()
+        if entry is not None:
+            entries.append(entry)
+            valid_flags.append(entry.is_valid())
+        else:
+            if proc.poll() is not None:
+                break
+            time.sleep(poll_interval_sec)
+    return entries, valid_flags
 
 
 def cleanup_shm(shm_name: str) -> None:
@@ -208,6 +252,62 @@ def run_generator_and_reader(
         json_path.unlink(missing_ok=True)
 
 
+def run_generator_and_reader_entries(
+    shm_name: str,
+    record_count: int,
+    *,
+    buffer_size: int = 10240,
+    min_payload_size: int = 10,
+    max_payload_size: int = 100,
+    seed: int = 42,
+    interval_us: int = 0,
+    initial_delay_us: int = _GENERATOR_INITIAL_DELAY_US,
+    validate_entries: bool = False,
+) -> tuple[list, dict] | tuple[list, dict, list[bool]]:
+    """
+    Like run_generator_and_reader but returns (entries, expected_data) where
+    entries are Entry objects. If validate_entries=True, also returns
+    (entries, expected_data, valid_flags) where valid_flags are is_valid() results.
+    """
+    proc, json_path = start_generator_async(
+        shm_name=shm_name,
+        buffer_size=buffer_size,
+        record_count=record_count,
+        min_payload_size=min_payload_size,
+        max_payload_size=max_payload_size,
+        seed=seed,
+        interval_us=interval_us,
+        initial_delay_us=initial_delay_us,
+    )
+    try:
+        reader = Reader(shm_name)
+        try:
+            if validate_entries:
+                entries, valid_flags = read_realtime_entries_with_validation(
+                    reader, record_count, proc
+                )
+            else:
+                entries = read_realtime_entries(reader, record_count, proc)
+                valid_flags = None
+            proc.wait(timeout=30)
+            if proc.returncode != 0:
+                _, stderr = proc.communicate()
+                pytest.fail("Generator failed: {}".format(stderr))
+            with open(json_path) as f:
+                expected_data = json.load(f)
+            if validate_entries:
+                return entries, expected_data, valid_flags
+            return entries, expected_data
+        finally:
+            reader.close()
+    finally:
+        if proc.returncode is None:
+            proc.kill()
+            proc.wait()
+        cleanup_shm(shm_name)
+        json_path.unlink(missing_ok=True)
+
+
 def assert_payloads_match_json(payloads: list, expected_data: dict) -> None:
     """Assert payloads equal expected_data['records'] payload_hex (decoded)."""
     records = expected_data.get("records", [])
@@ -224,6 +324,23 @@ def assert_payloads_match_json(payloads: list, expected_data: dict) -> None:
 def gen_reader():
     """Fixture that returns run_generator_and_reader."""
     return run_generator_and_reader
+
+
+@pytest.fixture
+def gen_reader_entries():
+    """Fixture that returns run_generator_and_reader_entries."""
+    return run_generator_and_reader_entries
+
+
+def _run_generator_and_reader_entries_validated(shm_name, **kwargs):
+    """Call run_generator_and_reader_entries with validate_entries=True."""
+    return run_generator_and_reader_entries(shm_name, validate_entries=True, **kwargs)
+
+
+@pytest.fixture
+def gen_reader_entries_validated():
+    """Fixture that returns run_generator_and_reader_entries with validate_entries=True."""
+    return _run_generator_and_reader_entries_validated
 
 
 @pytest.fixture

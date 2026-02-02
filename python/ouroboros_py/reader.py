@@ -91,6 +91,100 @@ def _load_acquire_u64(data: Union[bytes, memoryview], offset: int) -> int:
     return struct.unpack("<Q", data[offset : offset + 8])[0]
 
 
+class ChunkInfo:
+    """Information about a chunk in the buffer."""
+
+    __slots__ = ("_index", "_token", "_offset", "_is_committed")
+
+    def __init__(
+        self,
+        index: int,
+        token: int,
+        offset: int,
+        is_committed: bool,
+    ) -> None:
+        self._index = index
+        self._token = token
+        self._offset = offset
+        self._is_committed = is_committed
+
+    @property
+    def index(self) -> int:
+        """Chunk index in the chunk table."""
+        return self._index
+
+    @property
+    def token(self) -> int:
+        """Chunk token (number of entries written before this chunk)."""
+        if not self._is_committed:
+            raise ValueError("Chunk is uncommitted")
+        return self._token
+
+    @property
+    def offset(self) -> int:
+        """Byte offset of the chunk in the buffer."""
+        if not self._is_committed:
+            raise ValueError("Chunk is uncommitted")
+        return self._offset
+
+    @property
+    def is_committed(self) -> bool:
+        """Whether the chunk is committed."""
+        return self._is_committed
+
+
+class Entry:
+    """A log entry with payload data and chunk metadata.
+
+    Mirrors the C++ reader::entry struct. Use is_valid() to check if the
+    entry is still valid (has not been overwritten) before using the data.
+    """
+
+    __slots__ = ("_data", "_chunk_info", "_sequence_number", "_chunk_row_view")
+
+    def __init__(
+        self,
+        data: bytes,
+        chunk_info: ChunkInfo,
+        sequence_number: int,
+        chunk_row_view: memoryview,
+    ) -> None:
+        self._data = data
+        self._chunk_info = chunk_info
+        self._sequence_number = sequence_number
+        self._chunk_row_view = chunk_row_view
+
+    @property
+    def data(self) -> bytes:
+        """Payload bytes for this entry."""
+        return self._data
+
+    @property
+    def chunk_info(self) -> ChunkInfo:
+        """Chunk metadata for this entry."""
+        return self._chunk_info
+
+    @property
+    def sequence_number(self) -> int:
+        """Sequence number of this entry (chunk_token + entries read in chunk)."""
+        return self._sequence_number
+
+    def is_valid(self) -> bool:
+        """Check if the entry is still valid (chunk has not been overwritten).
+
+        Re-reads the chunk token from the buffer (via the stored chunk row view)
+        and compares with the token at read time. If they match, the entry was
+        not overwritten. Returns False if the buffer is no longer available
+        (e.g. reader was closed).
+        """
+        try:
+            current_token = _load_acquire_u64(self._chunk_row_view, 8)
+            return self._chunk_info.token == current_token
+        except (ValueError, TypeError):
+            # Buffer was released (reader closed) or similar
+            return False
+
+
 class Reader:
     """Pure-Python reader for Ouroboros shared-memory log buffers."""
 
@@ -280,8 +374,26 @@ class Reader:
         self._entries_read_in_current_chunk = 0
         return True
 
-    def _read_next_entry(self) -> Optional[bytes]:
-        """Read the next entry from the log, returning None if no data available."""
+    def _get_chunk_info(self, chunk_index: int) -> ChunkInfo:
+        """Get ChunkInfo for the given chunk index."""
+        offset = self._chunk_row_offset(chunk_index)
+        offset_value = _load_acquire_u64(self._buffer, offset)
+        token_value = _load_acquire_u64(self._buffer, offset + 8)
+        is_committed = _is_committed(offset_value)
+        chunk_offset = _clear_commit(offset_value) if is_committed else 0
+        return ChunkInfo(
+            index=chunk_index,
+            token=token_value,
+            offset=chunk_offset,
+            is_committed=is_committed,
+        )
+
+    def read_next_entry(self) -> Optional[Entry]:
+        """Read the next entry from the log, returning None if no data available.
+
+        Returns:
+            Entry with data and chunk info, or None if no entry is available.
+        """
         if self._buffer is None:
             raise ReaderError("Reader not attached to buffer")
 
@@ -291,13 +403,13 @@ class Reader:
             # Implicit wrap: no room for header
             if self._offset + ENTRY_HEADER_SIZE > len(self._buffer):
                 log.debug(
-                    "_read_next_entry: wrap at offset=%d (buf_len=%d), jump chunk 0",
+                    "read_next_entry: wrap at offset=%d (buf_len=%d), jump chunk 0",
                     self._offset,
                     len(self._buffer),
                 )
                 if not self._jump_to_chunk(0):
                     log.debug(
-                        "_read_next_entry: jump_to_chunk(0) failed, returning None"
+                        "read_next_entry: jump_to_chunk(0) failed, returning None"
                     )
                     return None
                 continue
@@ -312,17 +424,17 @@ class Reader:
                 self._current_chunk_index
             ):
                 log.debug(
-                    "_read_next_entry: chunk %d invalidated (token stale), jump latest",
+                    "read_next_entry: chunk %d invalidated (token stale), jump latest",
                     self._current_chunk_index,
                 )
                 latest = self._find_chunk_with_highest_token()
                 if latest is None:
-                    log.debug("_read_next_entry: no chunk with highest token, None")
+                    log.debug("read_next_entry: no chunk with highest token, None")
                     return None
 
                 if not self._jump_to_chunk(latest):
                     log.debug(
-                        "_read_next_entry: jump_to_chunk(%d) failed, None", latest
+                        "read_next_entry: jump_to_chunk(%d) failed, None", latest
                     )
                     return None
                 continue
@@ -330,7 +442,7 @@ class Reader:
             # Check if the entry is committed
             if not _is_committed(length_with_flag, bits=32):
                 log.debug(
-                    "_read_next_entry: offset=%d length_with_flag=0x%x not committed",
+                    "read_next_entry: offset=%d length_with_flag=0x%x not committed",
                     self._offset,
                     length_with_flag,
                 )
@@ -342,18 +454,18 @@ class Reader:
             # Check if the entry length is valid
             if length == 0:
                 log.debug(
-                    "_read_next_entry: offset=%d length=0 (not written yet)",
+                    "read_next_entry: offset=%d length=0 (not written yet)",
                     self._offset,
                 )
                 return None
 
             if length == 1:
                 log.debug(
-                    "_read_next_entry: offset=%d length=1 (writer wrap), jump chunk 0",
+                    "read_next_entry: offset=%d length=1 (writer wrap), jump chunk 0",
                     self._offset,
                 )
                 if not self._jump_to_chunk(0):
-                    log.debug("_read_next_entry: jump_to_chunk(0) failed, None")
+                    log.debug("read_next_entry: jump_to_chunk(0) failed, None")
                     return None
                 continue
 
@@ -376,7 +488,7 @@ class Reader:
                 next_chunk_offset = self._get_chunk_offset(next_chunk_index)
                 if next_chunk_offset != 0 and self._offset == next_chunk_offset:
                     log.debug(
-                        "_read_next_entry: at chunk boundary, jump chunk %d",
+                        "read_next_entry: at chunk boundary, jump chunk %d",
                         next_chunk_index,
                     )
                     if not self._jump_to_chunk(next_chunk_index):
@@ -394,8 +506,26 @@ class Reader:
             self._total_entries_read += 1
             self._entries_read_in_current_chunk += 1
 
+            sequence_number = self._current_chunk_token + self._entries_read_in_current_chunk
+            chunk_info = ChunkInfo(
+                index=self._current_chunk_index,
+                token=self._current_chunk_token,
+                offset=self._get_chunk_offset(self._current_chunk_index),
+                is_committed=True,
+            )
+            chunk_row_offset = self._chunk_row_offset(self._current_chunk_index)
+            chunk_row_view = memoryview(self._buffer)[
+                chunk_row_offset : chunk_row_offset + CHUNK_ROW_SIZE
+            ]
+            entry = Entry(
+                data=payload,
+                chunk_info=chunk_info,
+                sequence_number=sequence_number,
+                chunk_row_view=chunk_row_view,
+            )
+
             log.debug(
-                "_read_next_entry: read payload chunk=%d offset_was=%d len=%d "
+                "read_next_entry: read payload chunk=%d offset_was=%d len=%d "
                 "payload_size=%d total_read=%d",
                 self._current_chunk_index,
                 payload_start - ENTRY_HEADER_SIZE,
@@ -403,34 +533,38 @@ class Reader:
                 payload_size,
                 self._total_entries_read,
             )
-            return payload
+            return entry
 
-    def read_next(self) -> Optional[bytes]:
-        """Read the next available entry, if any.
+    def read_next(self) -> Optional[str]:
+        """Read the next available entry as a string, if any.
 
-        Returns one payload or None when no data is available yet (or when
-        all data has been read). Use this for real-time reading: poll in a
-        loop, collect payloads, and stop when you have enough or the writer
-        has finished.
+        Returns one payload decoded as UTF-8 or None when no data is available
+        yet (or when all data has been read), or when the entry was overwritten.
 
         Returns:
-            Payload bytes for the next entry, or None if no entry is available.
+            Payload decoded as UTF-8 string, or None if no entry is available.
+            Invalid UTF-8 sequences are replaced with the replacement character.
         """
-        return self._read_next_entry()
+        entry = self.read_next_entry()
+        if entry is None:
+            return None
+        if not entry.is_valid():
+            return None
+        return entry.data.decode("utf-8", errors="replace")
 
-    def read_all(self) -> List[bytes]:
+    def read_all(self) -> List[Entry]:
         """Read all available entries from the log.
 
         Returns:
-            List of payload bytes for all entries in order
+            List of Entry objects for all entries in order
 
         Raises:
             ReaderError: If reading fails
         """
         log.debug("read_all() called on Reader for shm '%s'", self._name)
-        entries = []
+        entries: List[Entry] = []
         while True:
-            entry = self._read_next_entry()
+            entry = self.read_next_entry()
             if entry is None:
                 break
             entries.append(entry)
@@ -441,14 +575,14 @@ class Reader:
         )
         return entries
 
-    def __iter__(self) -> Iterator[bytes]:
+    def __iter__(self) -> Iterator[Entry]:
         """Iterate over all available entries.
 
         Yields:
-            Payload bytes for each entry in order
+            Entry for each log entry in order
         """
         while True:
-            entry = self._read_next_entry()
+            entry = self.read_next_entry()
             if entry is None:
                 break
             yield entry
@@ -462,10 +596,22 @@ class Reader:
         self.close()
 
     def close(self) -> None:
-        """Close the shared memory connection."""
+        """Close the shared memory connection.
+
+        Note: If Entry objects with chunk row views are still referenced elsewhere,
+        SharedMemory.close() may raise BufferError. Discard entries before closing
+        for clean shutdown.
+        """
         if self._shm is not None:
             log.debug("Closing Reader for shm '%s'", self._name)
-            self._shm.close()
+            try:
+                self._shm.close()
+            except BufferError:
+                log.warning(
+                    "Could not close shared memory '%s': Entry views still exist. "
+                    "Discard Entry objects before closing for clean shutdown.",
+                    self._name,
+                )
             self._shm = None
             self._buffer = None
 

@@ -135,7 +135,8 @@ public:
     // subspan
     span<T> subspan(size_type offset, size_type count) const
     {
-        VERIFY(offset + count <= m_size, "Subspan out of bounds!", offset, count, m_size);
+        VERIFY(offset + count <= m_size, "Subspan out of bounds!", offset,
+               count, m_size);
         return span<T>(m_ptr + offset, count);
     }
 

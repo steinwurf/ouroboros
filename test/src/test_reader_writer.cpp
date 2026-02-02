@@ -789,15 +789,18 @@ TEST(test_reader_writer, chunk_invalidation_and_wrap_sequence)
     constexpr std::size_t header_and_table =
         ouroboros::detail::buffer_format::buffer_header_size +
         (chunk_count * ouroboros::detail::buffer_format::chunk_row_size);
-    ASSERT_EQ(header_and_table, 80); // header_and_table = 16 + (4 * 16) = 80 bytes
+    ASSERT_EQ(header_and_table,
+              80); // header_and_table = 16 + (4 * 16) = 80 bytes
     // First chunk starts at 80, which is already 4-byte aligned
     const std::size_t usable_space = buffer_size - header_and_table;
-    ASSERT_EQ(usable_space, 1024); // usable_space = (16 + 64 + 1024) - 80 = 1024 bytes
+    ASSERT_EQ(usable_space,
+              1024); // usable_space = (16 + 64 + 1024) - 80 = 1024 bytes
 
     // Calculate entries per chunk
     constexpr std::size_t entries_per_chunk =
         chunk_target_size / entry_total_size;
-    ASSERT_EQ(entries_per_chunk, 32); // entries_per_chunk = 256 / 8 = 32 entries
+    ASSERT_EQ(entries_per_chunk,
+              32); // entries_per_chunk = 256 / 8 = 32 entries
 
     // Total entries that fit exactly: 4 chunks * 32 entries = 128 entries
     constexpr std::size_t total_entries = chunk_count * entries_per_chunk;
@@ -860,7 +863,9 @@ TEST(test_reader_writer, chunk_invalidation_and_wrap_sequence)
     // Verify no more entries
     {
         auto no_more = reader.read_next_entry();
-        EXPECT_FALSE(no_more.has_value()) << "Should have no more entries but got entry with sequence number " << no_more.value().sequence_number;
+        EXPECT_FALSE(no_more.has_value())
+            << "Should have no more entries but got entry with sequence number "
+            << no_more.value().sequence_number;
     }
 
     // Step 3: Writer writes another small 4-byte entry
