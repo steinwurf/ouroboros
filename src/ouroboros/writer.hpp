@@ -350,6 +350,11 @@ public:
         return m_chunk_count;
     }
 
+    auto total_entries_written() const -> std::size_t
+    {
+        return m_total_entries_written;
+    }
+
 private:
     static void initialize_chunk(std::span<uint8_t> info, uint64_t offset,
                                  uint64_t token)

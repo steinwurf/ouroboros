@@ -143,14 +143,14 @@ inline constexpr auto chunk_row_offset(std::size_t chunk_index) -> std::size_t
 // ---- Small helpers for "commit bit" patterns ----
 
 template <class T>
-inline bool is_committed(T v) noexcept
+inline constexpr bool is_committed(T v) noexcept
 {
     constexpr T msb_mask = static_cast<T>(1) << (sizeof(T) * 8 - 1);
     return (v & msb_mask) != 0;
 }
 
 template <class T>
-inline T clear_commit(T v) noexcept
+inline constexpr T clear_commit(T v) noexcept
 {
     VERIFY(is_committed(v), "Value is not committed", v);
     constexpr T msb_mask = static_cast<T>(1) << (sizeof(T) * 8 - 1);
@@ -158,7 +158,7 @@ inline T clear_commit(T v) noexcept
 }
 
 template <class T>
-inline T set_commit(T v) noexcept
+inline constexpr T set_commit(T v) noexcept
 {
     VERIFY(!is_committed(v), "Value is already committed", v);
     constexpr T msb_mask = static_cast<T>(1) << (sizeof(T) * 8 - 1);

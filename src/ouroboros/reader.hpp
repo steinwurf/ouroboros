@@ -51,6 +51,57 @@ public:
         from_lowest
     };
 
+    struct chunk_info
+    {
+        constexpr chunk_info() noexcept :
+            m_token(0),
+            m_offset(0),
+            m_is_committed(false),
+            m_index(0) {}
+        constexpr chunk_info(std::size_t index, uint64_t token, uint64_t offset_and_commit_flag) noexcept :
+            m_token(token),
+            m_is_committed(detail::buffer_format::is_committed(offset_and_commit_flag)),
+            m_offset(detail::buffer_format::is_committed(offset_and_commit_flag) ? detail::buffer_format::clear_commit(offset_and_commit_flag) : 0),
+            m_index(index) {}
+
+        constexpr chunk_info& operator=(const chunk_info& other)
+        {
+            m_token = other.m_token;
+            m_offset = other.m_offset;
+            m_is_committed = other.m_is_committed;
+            m_index = other.m_index;
+            return *this;
+        }
+        
+        constexpr bool is_committed() const
+        {
+            return m_is_committed;
+        }
+
+        constexpr uint64_t offset() const
+        {
+            VERIFY(is_committed(), "Chunk is uncommitted");
+            return m_offset;
+        }
+        
+        constexpr uint64_t  token() const
+        {
+            VERIFY(is_committed(), "Chunk is uncommitted");
+            return m_token;
+        }
+
+        constexpr std::size_t index() const
+        {
+            return m_index;
+        }
+
+    private:
+        uint64_t m_token;
+        uint64_t m_offset;
+        std::size_t m_index;
+        bool m_is_committed;
+    };
+
     struct entry
     {
         entry(std::string_view data, std::span<const uint8_t> chunk_row,
@@ -60,10 +111,10 @@ public:
         {
         }
 
-        std::string_view data;
-        std::span<const uint8_t> chunk_row;
-        uint64_t chunk_token;
-        uint64_t sequence_number;
+        const std::string_view data;
+        const std::span<const uint8_t> chunk_row;
+        const uint64_t chunk_token;
+        const uint64_t sequence_number;
 
         bool is_valid() const
         {
@@ -128,8 +179,8 @@ public:
                 make_error_code(ouroboros::error::buffer_too_small));
         }
 
-        const auto start = find_starting_chunk(buffer, chunk_count, strategy);
-        if (!start)
+        const auto start = find_chunk(buffer, chunk_count, strategy);
+        if (!start.is_committed())
         {
             return tl::make_unexpected(
                 make_error_code(ouroboros::error::no_data_available));
@@ -137,12 +188,8 @@ public:
 
         m_buffer = buffer;
         m_chunk_count = chunk_count;
-
-        if (!jump_to_chunk(start.value()))
-        {
-            return tl::make_unexpected(
-                make_error_code(ouroboros::error::no_data_available));
-        }
+        m_total_entries_read = 0;
+        set_current_chunk(start);
 
         return {};
     }
@@ -173,43 +220,67 @@ public:
                     return tl::make_unexpected(
                         make_error_code(ouroboros::error::no_data_available));
                 }
-
-                continue;
+            }
+            
+            // Check if we advanced to the next chunk by reading into it.
+            const std::size_t next_chunk_index = m_current_chunk.index() + 1;
+            // First we check if that's even possible by checking the chunk count.
+            if (next_chunk_index < m_chunk_count)
+            {
+                // Then we check if the next chunk is committed and if the offset is the same as the current offset.
+                const auto next_chunk_info = get_chunk_info(m_buffer, next_chunk_index);
+                if (next_chunk_info.is_committed() &&
+                    m_offset == next_chunk_info.offset())
+                {
+                    // Check that the next chunk is newer than the current.
+                    if (next_chunk_info.token() <= m_current_chunk.token())
+                    {
+                        // It wasn't which means that the must wait for the next chunk to be (re)written.
+                        return tl::make_unexpected(
+                            make_error_code(ouroboros::error::no_data_available));
+                    }
+                    set_current_chunk(next_chunk_info);
+                }
             }
 
-            // We have room for the entry header, read it.
+            // Get the entry header.
             const uint32_t* entry_header =
                 detail::buffer_format::entry_header(m_buffer.subspan(
                     m_offset, detail::buffer_format::entry_header_size));
 
+            // Read the entry header.
             const uint32_t length_with_flag =
                 detail::atomic::load_acquire(entry_header);
+   
+            // Get the chunk info.
+            const chunk_info chunk_info = get_chunk_info(m_buffer, m_current_chunk.index());
 
-            // Check if the read was valid by checking the chunk token.
-            if (!is_chunk_committed(m_buffer, m_current_chunk_index) ||
-                m_current_chunk_token !=
-                    get_chunk_token(m_buffer, m_current_chunk_index))
+            // Check if the buffered chunk info is valid.
+            if (!chunk_info.is_committed() ||
+                chunk_info.token() != m_current_chunk.token())
             {
-                // If the chunk is not committed or the token is not the same,
-                // we need to jump to the latest chunk and retry.
-                auto latest = find_starting_chunk(m_buffer, m_chunk_count,
+                // The chunk has changed, the entry is invalid.
+                // This means the reader was too slow and entries have been overwritten.
+                // We need to jump to the latest chunk and start reading from there.
+                const auto latest = find_chunk(m_buffer, m_chunk_count,
                                                   read_strategy::from_latest);
-                if (!latest)
+                if (!latest.is_committed())
                 {
                     // No more data available.
                     return tl::make_unexpected(
                         make_error_code(ouroboros::error::no_data_available));
                 }
 
-                // Jump to the latest chunk
-                if (!jump_to_chunk(latest.value()))
+                if (latest.token() <= m_current_chunk.token())
                 {
-                    // Failed to jump to the latest chunk. No more data
-                    // available.
+                    // The latest chunk is not newer than the current chunk.
+                    // This means that the must wait for the next chunk to be (re)written.
                     return tl::make_unexpected(
                         make_error_code(ouroboros::error::no_data_available));
                 }
-
+                
+                // Move to the latest chunk.
+                set_current_chunk(latest);
                 continue;
             }
 
@@ -225,7 +296,7 @@ public:
             const std::size_t length =
                 detail::buffer_format::clear_commit(length_with_flag);
 
-            // Check if the entry length is valid.
+            // Check the entry length
             if (length == 0)
             {
                 // The entry length is 0 which means this entry is not yet
@@ -241,7 +312,7 @@ public:
                 // read.
                 if (!jump_to_chunk(0))
                 {
-                    // The first chunk is not yet available. No more data
+                    // Failed to jump to the first chunk. No more data
                     // available.
                     return tl::make_unexpected(
                         make_error_code(ouroboros::error::no_data_available));
@@ -261,26 +332,7 @@ public:
                    "Entry exceeds buffer bounds", m_offset, length,
                    m_buffer.size());
 
-            // Check if we advanced to the next chunk by reading into it.
-            const std::size_t next_chunk_index = m_current_chunk_index + 1;
-            if (next_chunk_index < m_chunk_count)
-            {
-                const std::size_t next_chunk_offset =
-                    get_chunk_offset(m_buffer, next_chunk_index);
-                if (next_chunk_offset != 0 && m_offset == next_chunk_offset)
-                {
-                    auto success = jump_to_chunk(next_chunk_index);
-                    if (!success)
-                    {
-                        // Failed to jump to the next chunk. Must have been
-                        // invalidated by the writer.
-                        return tl::make_unexpected(make_error_code(
-                            ouroboros::error::no_data_available));
-                    }
-                    continue;
-                }
-            }
-
+            
             // Extract payload
             const std::size_t payload_size =
                 length - detail::buffer_format::entry_header_size;
@@ -288,9 +340,6 @@ public:
                 m_buffer.data() + m_offset +
                 detail::buffer_format::entry_header_size);
             std::string_view payload_view(payload_data, payload_size);
-
-            // Chunk row for validity checks
-            const auto& info = chunk_row(m_buffer, m_current_chunk_index);
 
             // Advance
             m_offset += length;
@@ -303,8 +352,8 @@ public:
             // written before this chunk, so we add the entries read in this
             // chunk
             const uint64_t sequence_number =
-                m_current_chunk_token + m_entries_read_in_current_chunk;
-            return entry(payload_view, info, m_current_chunk_token,
+                m_current_chunk.token() + m_entries_read_in_current_chunk;
+            return entry(payload_view, chunk_row(m_buffer, m_current_chunk.index()), m_current_chunk.token(),
                          sequence_number);
         }
     }
@@ -337,12 +386,52 @@ public:
     }
 
 private:
+
+
+    auto jump_to_chunk(std::size_t chunk_index) -> bool
+    {
+        const auto info = get_chunk_info(m_buffer, chunk_index);
+        if (!info.is_committed() || info.token() <= m_current_chunk.token())
+        {
+            return false;
+        }
+        set_current_chunk(info);
+        return true;
+    }
+
+    void set_current_chunk(const chunk_info& info) 
+    {
+        VERIFY(info.is_committed(), "Chunk is not committed", info);
+        // Check that if the current chunk is committed, the current chunk token should be less that the new chunk token.
+        if (m_current_chunk.is_committed())
+        {
+            VERIFY(m_current_chunk.token() < info.token(), "Current chunk token is greater than new chunk token", m_current_chunk.token(), info.token());
+        }
+        m_current_chunk = info;
+        m_offset = m_current_chunk.offset();
+        VERIFY(m_offset % detail::buffer_format::entry_alignment == 0,
+            "Chunk offset is not aligned to entry alignment", m_offset,
+            detail::buffer_format::entry_alignment);
+        VERIFY(m_offset <= m_buffer.size(), "Chunk offset is greater than buffer size", m_offset, m_buffer.size());
+        m_entries_read_in_current_chunk = 0;
+    }
+
     template <typename T>
     static T read_value(const uint8_t* buffer)
     {
         T value;
         std::memcpy(&value, buffer, sizeof(value));
         return value;
+    }
+
+    static auto get_chunk_info(std::span<const uint8_t> buffer,
+                               std::size_t chunk_index) -> chunk_info
+    {
+        const auto& row = chunk_row(buffer, chunk_index);
+        return chunk_info(chunk_index, detail::atomic::load_acquire(
+            detail::buffer_format::chunk_token(row)),
+            detail::atomic::load_acquire(
+                detail::buffer_format::chunk_offset(row)));
     }
 
     static auto chunk_row(std::span<const uint8_t> buffer,
@@ -353,140 +442,90 @@ private:
             detail::buffer_format::chunk_row_size);
     }
 
-    static auto get_chunk_offset(std::span<const uint8_t> buffer,
-                                 std::size_t chunk_index) -> std::size_t
-    {
-        const auto& info = chunk_row(buffer, chunk_index);
-        const uint64_t offset_value = detail::atomic::load_acquire(
-            detail::buffer_format::chunk_offset(info));
-        if (!detail::buffer_format::is_committed(offset_value))
-        {
-            return 0;
-        }
-        return detail::buffer_format::clear_commit(offset_value);
-    }
-
-    static auto get_chunk_token(std::span<const uint8_t> buffer,
-                                std::size_t chunk_index) -> uint64_t
-    {
-        const auto& info = chunk_row(buffer, chunk_index);
-        return detail::atomic::load_acquire(
-            detail::buffer_format::chunk_token(info));
-    }
-
-    static auto is_chunk_committed(std::span<const uint8_t> buffer,
-                                   std::size_t chunk_index) -> bool
-    {
-        const auto& info = chunk_row(buffer, chunk_index);
-        const uint64_t offset_value = detail::atomic::load_acquire(
-            detail::buffer_format::chunk_offset(info));
-        return detail::buffer_format::is_committed(offset_value);
-    }
-
     static auto
-    find_starting_chunk(std::span<const uint8_t> buffer,
+    find_chunk(std::span<const uint8_t> buffer,
                         std::size_t chunk_count,
-                        read_strategy strategy) -> std::optional<std::size_t>
+                        read_strategy strategy) -> chunk_info
     {
         switch (strategy)
         {
         case read_strategy::auto_detect:
-            if (is_chunk_committed(buffer, 0) &&
-                get_chunk_token(buffer, 0) == 0)
+        {
+            const auto info = get_chunk_info(buffer, 0);
+            if (info.is_committed() && 
+                info.token() == 0)
             {
-                return 0;
+                return info;
             }
+            // The first chunk is not committed or has already been overwritten.
+            // Let's find the most current chunk.
             [[fallthrough]];
+        }
         case read_strategy::from_latest:
             return find_chunk_with_highest_token(buffer, chunk_count);
         case read_strategy::from_lowest:
             return find_chunk_with_lowest_token(buffer, chunk_count);
+        default:
+            VERIFY(false, "Invalid read strategy", strategy);
         }
         return {};
     }
 
     static auto find_chunk_with_highest_token(std::span<const uint8_t> buffer,
-                                              std::size_t chunk_count)
-        -> std::optional<std::size_t>
+                                              std::size_t chunk_count) -> chunk_info
     {
-        std::optional<std::size_t> best_chunk = {};
-        uint64_t best_token = 0;
-
-        for (std::size_t i = 0; i < chunk_count; ++i)
+        chunk_info best_chunk = get_chunk_info(buffer, 0);
+        for (std::size_t i = 1; i < chunk_count; ++i)
         {
-            if (!is_chunk_committed(buffer, i))
+            const auto info = get_chunk_info(buffer, i);
+            if (!info.is_committed())
             {
                 continue;
             }
-
-            const uint64_t token = get_chunk_token(buffer, i);
-            if (token > best_token)
+            if (!best_chunk.is_committed())
             {
-                best_token = token;
-                best_chunk = i;
+                best_chunk = info;
+                continue;
+            }
+
+            if (info.token() > best_chunk.token())
+            {
+                best_chunk = info;
             }
         }
-
         return best_chunk;
     }
 
     static auto find_chunk_with_lowest_token(std::span<const uint8_t> buffer,
-                                             std::size_t chunk_count)
-        -> std::optional<std::size_t>
+                                                std::size_t chunk_count)
+            -> chunk_info
     {
-        std::optional<std::size_t> best_chunk = {};
-        uint64_t best_token = std::numeric_limits<uint64_t>::max();
-
-        for (std::size_t i = 0; i < chunk_count; ++i)
+        chunk_info best_chunk = get_chunk_info(buffer, 0);
+        for (std::size_t i = 1; i < chunk_count; ++i)
         {
-            if (!is_chunk_committed(buffer, i))
+            const auto info = get_chunk_info(buffer, i);
+            if (!info.is_committed())
             {
                 continue;
             }
-
-            const uint64_t token = get_chunk_token(buffer, i);
-            if (token < best_token)
+            if (!best_chunk.is_committed())
             {
-                best_token = token;
-                best_chunk = i;
+                best_chunk = info;
+                continue;
+            }
+            if (info.token() < best_chunk.token())
+            {
+                best_chunk = info;
             }
         }
-
         return best_chunk;
-    }
-
-    // Extracted because it is used in 3+ places (configure + wrap cases).
-    auto jump_to_chunk(std::size_t chunk_index) -> bool
-    {
-        const auto chunk_offset = get_chunk_offset(m_buffer, chunk_index);
-        if (chunk_offset == 0)
-        {
-            return false;
-        }
-
-        VERIFY(chunk_offset % detail::buffer_format::entry_alignment == 0,
-               "Chunk offset is not aligned to entry alignment", chunk_offset,
-               detail::buffer_format::entry_alignment);
-        const auto chunk_token = get_chunk_token(m_buffer, chunk_index);
-        if (chunk_token < m_current_chunk_token)
-        {
-            // We cannot jump to an older chunk.
-            return false;
-        }
-
-        m_current_chunk_token = chunk_token;
-        m_current_chunk_index = chunk_index;
-        m_offset = chunk_offset;
-        m_entries_read_in_current_chunk = 0;
-        return true;
     }
 
 private:
     std::size_t m_chunk_count = 0;
     std::span<const uint8_t> m_buffer;
 
-    std::size_t m_current_chunk_index = 0;
-    uint64_t m_current_chunk_token = 0;
+    chunk_info m_current_chunk;
     std::size_t m_offset = 0;
     std::size_t m_total_entries_read = 0;
     std::size_t m_entries_read_in_current_chunk = 0;
