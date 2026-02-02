@@ -220,8 +220,7 @@ func (r *Reader) setCurrentChunk(info ChunkInfo) {
 		panic("chunk is not committed")
 	}
 	if r.currentChunk.IsCommitted && info.Token <= r.currentChunk.Token {
-		panic("new chunk token is not greater than current chunk token: " +
-			fmt.Sprintf("current chunk token: %d, new chunk token: %d", r.currentChunk.Token, info.Token))
+		panic("new chunk token is not greater than current chunk token")
 	}
 	r.currentChunk = info
 	r.offset = info.Offset

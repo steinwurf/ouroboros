@@ -70,6 +70,13 @@ def prepare_release(ctx):
         replacement = 'version = "{}"'.format(VERSION)
         f.regex_replace(pattern=pattern, replacement=replacement)
 
+    go_version_file = "go/ouroboros/version.go"
+    if os.path.exists(go_version_file):
+        with ctx.rewrite_file(filename=go_version_file) as f:
+            pattern = r'PackageVersion = "\d+\.\d+\.\d+"'
+            replacement = 'PackageVersion = "{}"'.format(VERSION)
+            f.regex_replace(pattern=pattern, replacement=replacement)
+
 
 def _get_shm_generator_path(ctx):
     """Return the path to ouroboros_shm_generator. Fatal if not found."""
