@@ -9,7 +9,7 @@
     ],
     "scripts": {
       "format": [
-        "find ./test ./src ./tools \\( -iname '*.c' -o -iname '*.h' -o -iname '*.cpp' -o -iname '*.hpp' \\) -print0 | xargs -0 clang-format -i"
+        "find ./test ./src ./tools ./benchmark \\( -iname '*.c' -o -iname '*.h' -o -iname '*.cpp' -o -iname '*.hpp' \\) -print0 | xargs -0 clang-format -i"
       ]
     }
   }

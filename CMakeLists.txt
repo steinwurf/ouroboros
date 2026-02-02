@@ -167,4 +167,25 @@ if(${CMAKE_PROJECT_NAME} STREQUAL ${PROJECT_NAME})
   install(TARGETS ouroboros_shm_dumper
     RUNTIME DESTINATION bin
     COMPONENT tools)
+
+  # Include benchmark targets
+  # Google Benchmark dependency
+  set(BENCHMARK_ENABLE_TESTING
+    OFF
+    CACHE INTERNAL "Disable gbenchmark test" FORCE)
+
+  if(NOT TARGET benchmark)
+    if(EXISTS "${STEINWURF_RESOLVE}/gbenchmark-source")
+      add_subdirectory("${STEINWURF_RESOLVE}/gbenchmark-source")
+    else()
+      include(FetchContent)
+      FetchContent_Declare(
+        benchmark
+        GIT_REPOSITORY https://github.com/google/benchmark.git
+        GIT_TAG v1.8.3)
+      FetchContent_MakeAvailable(benchmark)
+    endif()
+  endif()
+
+  add_subdirectory(benchmark)
 endif()
