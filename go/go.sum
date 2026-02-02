@@ -1,0 +1,6 @@
+github.com/google/uuid v1.6.0 h1:NIvaJDMOsjHA8n1jAhLSgzrAzy1Hgr+hNrb57e+94F0=
+github.com/google/uuid v1.6.0/go.mod h1:TIyPZe4MgqvfeYDBFedMoGGpEw/LqOeaOT+nhxU+yHo=
+github.com/tmthrgd/go-shm v0.0.0-20230106080200-1ec4c2ba35cf h1:zllFA+KeQ5EGsnMv8YtqBZQTEERX9UZkY+h2nKYY2JY=
+github.com/tmthrgd/go-shm v0.0.0-20230106080200-1ec4c2ba35cf/go.mod h1:sreX9Ec5xasLXkHjdpdrCXuYWgnB8a2T2ElLH+weMWY=
+golang.org/x/sys v0.28.0 h1:Fksou7UEQUWlKvIdsqzJmUmCX3cZuD2+P3XyyzwMhlA=
+golang.org/x/sys v0.28.0/go.mod h1:/VUhepiaJMQUp4+oa/7Zr1D23ma6VTLIYjOOTFZPUcA=

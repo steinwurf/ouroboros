@@ -90,6 +90,44 @@ To install the pure-Python shared-memory log reader from this repository:
 
 See the `python/README.md <python/README.md>`_ for usage and API details.
 
+Installing the Go reader 🐹
+--------------------------
+
+To use the pure-Go shared-memory log reader in another Go project, add it as a dependency.
+The module lives in the ``go/`` subdirectory of this repository:
+
+.. code-block:: bash
+
+    go get github.com/steinwurf/ouroboros/go/ouroboros
+
+Then import and use it:
+
+.. code-block:: go
+
+    import "github.com/steinwurf/ouroboros/go/ouroboros"
+
+    reader, err := ouroboros.NewReader("/my_shm_name")
+    if err != nil {
+        log.Fatal(err)
+    }
+    defer reader.Close()
+
+    for {
+        entry := reader.ReadNextEntry()
+        if entry == nil {
+            break
+        }
+        fmt.Printf("Entry: %s\n", string(entry.Data))
+    }
+
+To use from a local checkout (e.g. for development), add a replace directive to your ``go.mod``:
+
+.. code-block:: go
+
+    replace github.com/steinwurf/ouroboros/go => /path/to/ouroboros/go
+
+See the `go/README.md <go/README.md>`_ for requirements and more details.
+
 Requirements 📦
 ---------------
 

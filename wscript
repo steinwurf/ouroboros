@@ -25,6 +25,14 @@ def options(ctx):
             help="Filter the python tests to run",
         )
 
+        # Add option for filtering the go tests
+        ctx.add_option(
+            "--go-test-filter",
+            action="store",
+            default="",
+            help="Filter the go tests to run (passed to -run)",
+        )
+
 
 def configure(ctx):
     ctx.load("cmake")
@@ -62,14 +70,16 @@ def prepare_release(ctx):
         replacement = 'version = "{}"'.format(VERSION)
         f.regex_replace(pattern=pattern, replacement=replacement)
 
+    go_version_file = "go/ouroboros/version.go"
+    if os.path.exists(go_version_file):
+        with ctx.rewrite_file(filename=go_version_file) as f:
+            pattern = r'PackageVersion = "\d+\.\d+\.\d+"'
+            replacement = 'PackageVersion = "{}"'.format(VERSION)
+            f.regex_replace(pattern=pattern, replacement=replacement)
 
-class PythonTestContext(BuildContext):
-    cmd = "python_test"
-    fun = "python_test"
 
-
-def python_test(ctx):
-
+def _get_shm_generator_path(ctx):
+    """Return the path to ouroboros_shm_generator. Fatal if not found."""
     binary_name = "ouroboros_shm_generator"
 
     if platform.system() == "Linux":
@@ -96,29 +106,17 @@ def python_test(ctx):
             "'waf build'?".format(shm_generator)
         )
 
-    _, venv = _create_venv(ctx=ctx)
-
-    # Pass generator path via pytest option (works on Windows; VAR=value is Unix-only)
-    def _shell_quote(s):
-        if platform.system() == "Windows":
-            return '"' + s.replace('"', '\\"') + '"' if (" " in s or '"' in s) else s
-        return shlex.quote(s)
-
-    gen_opt = _shell_quote(shm_generator)
-    cmd_parts = ["pytest", "python/tests", "--ouroboros-shm-generator=" + gen_opt]
-    if ctx.options.python_test_filter:
-        cmd_parts.append("-k")
-        cmd_parts.append(_shell_quote(ctx.options.python_test_filter))
-    venv.run(" ".join(cmd_parts))
+    return shm_generator
 
 
-def _create_venv(ctx):
-    """Create a venv with the Python package and test dependencies.
+class PythonTestContext(BuildContext):
+    cmd = "python_test"
+    fun = "python_test"
 
-    Uses python/pyproject.toml; installs the package in editable mode with
-    the [test] extras (pytest). The venv is recreated when pyproject.toml
-    changes.
-    """
+
+def python_test(ctx):
+    shm_generator = _get_shm_generator_path(ctx)
+
     root = ctx.path.abspath()
     pyproject = os.path.join(root, "python", "pyproject.toml")
     if not os.path.isfile(pyproject):
@@ -140,4 +138,40 @@ def _create_venv(ctx):
         venv.run("python -m pip install --upgrade pip setuptools wheel")
         venv.run('python -m pip install -e "{}[test]"'.format(python_dir))
 
-    return exists, venv
+    # Pass generator path via pytest option (works on Windows; VAR=value is Unix-only)
+    def _shell_quote(s):
+        if platform.system() == "Windows":
+            return '"' + s.replace('"', '\\"') + '"' if (" " in s or '"' in s) else s
+        return shlex.quote(s)
+
+    gen_opt = _shell_quote(shm_generator)
+    cmd_parts = ["pytest", "python/tests", "--ouroboros-shm-generator=" + gen_opt]
+    if ctx.options.python_test_filter:
+        cmd_parts.append("-k")
+        cmd_parts.append(_shell_quote(ctx.options.python_test_filter))
+    venv.run(" ".join(cmd_parts))
+
+
+class GoTestContext(BuildContext):
+    cmd = "go_test"
+    fun = "go_test"
+
+
+def go_test(ctx):
+    shm_generator = _get_shm_generator_path(ctx)
+
+    root = ctx.path.abspath()
+    go_dir = os.path.join(root, "go")
+
+    env = os.environ.copy()
+    env["OUROBOROS_SHM_GENERATOR"] = shm_generator
+
+    cmd_parts = ["go", "test", "./...", "-v"]
+    if ctx.options.go_test_filter:
+        cmd_parts.extend(["-run", ctx.options.go_test_filter])
+
+    ctx.exec_command(
+        cmd_parts,
+        cwd=go_dir,
+        env=env,
+    )
