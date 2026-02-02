@@ -17,6 +17,12 @@
         "sha1": "5078750ed20c6d6323d27ed96fb2ddebc43bb247",
         "source": "github.com/TartanLlama/expected.git"
     },
+    "gbenchmark-source": {
+        "commit_id": "344117638c8ff7e239044fd0fa7085839fc03021",
+        "resolver_info": "v1.8.3",
+        "sha1": "2f70f76f52ae610b201e6738e0e76260de2a7405",
+        "source": "github.com/google/benchmark.git"
+    },
     "gtest": {
         "commit_id": "8e1f80ae8618fdba4389f1b56c811ea7241569d1",
         "resolver_info": "6.0.2",

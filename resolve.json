@@ -47,5 +47,15 @@
         "sources": [
             "github.com:CLIUtils/CLI11.git"
         ]
+    },
+    {
+        "name": "gbenchmark-source",
+        "internal": true,
+        "resolver": "git",
+        "method": "checkout",
+        "checkout": "v1.8.3",
+        "sources": [
+            "github.com/google/benchmark.git"
+        ]
     }
 ]
