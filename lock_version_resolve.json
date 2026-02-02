@@ -42,8 +42,8 @@
         "source": "github.com/steinwurf/platform.git"
     },
     "toolchains": {
-        "commit_id": "c46ef9216ae35a8dc185e09adbda55fab950384e",
-        "resolver_info": "1.0.6",
+        "commit_id": "14f038b2718bc7c1728ef875066fef5de0d1f2a7",
+        "resolver_info": "1.0.8",
         "sha1": "443cb23b0570dffd39283d8679ec393ed809302f",
         "source": "github.com/steinwurf/cmake-toolchains.git"
     },
