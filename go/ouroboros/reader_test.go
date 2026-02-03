@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Steinwurf ApS
+// SPDX-License-Identifier: MIT
+
 package ouroboros
 
 import (
@@ -92,9 +95,9 @@ func cleanupShm(shmName string) {
 }
 
 type expectedRecord struct {
-	Index        int    `json:"index"`
-	PayloadSize  int    `json:"payload_size"`
-	PayloadHex   string `json:"payload_hex"`
+	Index       int    `json:"index"`
+	PayloadSize int    `json:"payload_size"`
+	PayloadHex  string `json:"payload_hex"`
 }
 
 type expectedData struct {

@@ -1,9 +1,5 @@
-// Copyright (c) 2023 Steinwurf ApS
-// All Rights Reserved
-//
-// THIS IS UNPUBLISHED PROPRIETARY SOURCE CODE OF STEINWURF
-// The copyright notice above does not evidence any
-// actual or intended publication of such source code.
+// Copyright (c) 2026 Steinwurf ApS
+// SPDX-License-Identifier: MIT
 
 #pragma once
 
@@ -88,10 +84,9 @@ public:
     /// @param should_unlink If true, unlink the shared memory segment on
     ///                      destruction (default: true)
     /// @return Error if configuration fails
-    auto
-    configure(const std::string& shm_name, std::size_t chunk_target_size,
-              std::size_t chunk_count,
-              bool should_unlink = true) -> tl::expected<void, std::error_code>
+    auto configure(const std::string& shm_name, std::size_t chunk_target_size,
+                   std::size_t chunk_count, bool should_unlink = true)
+        -> tl::expected<void, std::error_code>
     {
         VERIFY(chunk_count > 0, "chunk_count must be greater than 0");
         VERIFY(!shm_name.empty(), "shm_name must not be empty");

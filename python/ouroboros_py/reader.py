@@ -1,3 +1,5 @@
+# Copyright (c) 2026 Steinwurf ApS
+# SPDX-License-Identifier: MIT
 """Pure-Python implementation of Ouroboros shared-memory log reader."""
 
 import logging
@@ -433,9 +435,7 @@ class Reader:
                     return None
 
                 if not self._jump_to_chunk(latest):
-                    log.debug(
-                        "read_next_entry: jump_to_chunk(%d) failed, None", latest
-                    )
+                    log.debug("read_next_entry: jump_to_chunk(%d) failed, None", latest)
                     return None
                 continue
 
@@ -506,7 +506,9 @@ class Reader:
             self._total_entries_read += 1
             self._entries_read_in_current_chunk += 1
 
-            sequence_number = self._current_chunk_token + self._entries_read_in_current_chunk
+            sequence_number = (
+                self._current_chunk_token + self._entries_read_in_current_chunk
+            )
             chunk_info = ChunkInfo(
                 index=self._current_chunk_index,
                 token=self._current_chunk_token,

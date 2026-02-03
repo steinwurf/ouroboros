@@ -1,9 +1,5 @@
-// Copyright (c) 2023 Steinwurf ApS
-// All Rights Reserved
-//
-// THIS IS UNPUBLISHED PROPRIETARY SOURCE CODE OF STEINWURF
-// The copyright notice above does not evidence any
-// actual or intended publication of such source code.
+// Copyright (c) 2026 Steinwurf ApS
+// SPDX-License-Identifier: MIT
 
 #pragma once
 
@@ -460,8 +456,8 @@ private:
     }
 
     static auto find_chunk(std::span<const uint8_t> buffer,
-                           std::size_t chunk_count,
-                           read_strategy strategy) -> chunk_info
+                           std::size_t chunk_count, read_strategy strategy)
+        -> chunk_info
     {
         switch (strategy)
         {
@@ -486,9 +482,9 @@ private:
         return {};
     }
 
-    static auto
-    find_chunk_with_highest_token(std::span<const uint8_t> buffer,
-                                  std::size_t chunk_count) -> chunk_info
+    static auto find_chunk_with_highest_token(std::span<const uint8_t> buffer,
+                                              std::size_t chunk_count)
+        -> chunk_info
     {
         chunk_info best_chunk = get_chunk_info(buffer, 0);
         for (std::size_t i = 1; i < chunk_count; ++i)
@@ -512,9 +508,9 @@ private:
         return best_chunk;
     }
 
-    static auto
-    find_chunk_with_lowest_token(std::span<const uint8_t> buffer,
-                                 std::size_t chunk_count) -> chunk_info
+    static auto find_chunk_with_lowest_token(std::span<const uint8_t> buffer,
+                                             std::size_t chunk_count)
+        -> chunk_info
     {
         chunk_info best_chunk = get_chunk_info(buffer, 0);
         for (std::size_t i = 1; i < chunk_count; ++i)

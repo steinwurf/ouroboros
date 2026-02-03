@@ -1,3 +1,5 @@
+# Copyright (c) 2026 Steinwurf ApS
+# SPDX-License-Identifier: MIT
 """Tests for ouroboros_py.Reader."""
 
 import pytest
@@ -80,7 +82,9 @@ def test_reader_nonexistent_shm():
         Reader("/nonexistent_shm_segment_12345")
 
 
-def test_entry_and_chunk_info(unique_shm_name, gen_reader_entries_validated, assert_payloads):
+def test_entry_and_chunk_info(
+    unique_shm_name, gen_reader_entries_validated, assert_payloads
+):
     """Verify Entry has data, chunk_info, sequence_number, and is_valid()."""
     entries, expected, valid_flags = gen_reader_entries_validated(
         unique_shm_name,

@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Steinwurf ApS
+// SPDX-License-Identifier: MIT
+//
 // Package ouroboros provides a pure-Go implementation of the Ouroboros
 // shared-memory log reader.
 package ouroboros
@@ -31,12 +34,12 @@ func readValueU32(b []byte, offset uint64) uint32 {
 
 // Buffer format constants (matching C++ buffer_format.hpp)
 const (
-	Magic             = 0x4F55524F424C4F47 // "OUROBLOG"
-	Version           = 1
-	BufferHeaderSize  = 16
-	ChunkRowSize      = 16
-	EntryHeaderSize = 4
-	EntryAlignment  = 4
+	Magic            = 0x4F55524F424C4F47 // "OUROBLOG"
+	Version          = 1
+	BufferHeaderSize = 16
+	ChunkRowSize     = 16
+	EntryHeaderSize  = 4
+	EntryAlignment   = 4
 )
 
 // Reader errors
@@ -83,7 +86,7 @@ type Reader struct {
 	buffer             []byte
 	chunkCount         uint32
 	currentChunk       ChunkInfo // cached; use for offset/token/index
-	offset             uint64   // current read position
+	offset             uint64    // current read position
 	totalEntriesRead   uint64
 	entriesReadInChunk uint64
 }

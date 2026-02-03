@@ -1,9 +1,5 @@
-// Copyright (c) 2023 Steinwurf ApS
-// All Rights Reserved
-//
-// THIS IS UNPUBLISHED PROPRIETARY SOURCE CODE OF STEINWURF
-// The copyright notice above does not evidence any
-// actual or intended publication of such source code.
+// Copyright (c) 2026 Steinwurf ApS
+// SPDX-License-Identifier: MIT
 
 #include <ouroboros/reader.hpp>
 #include <ouroboros/writer.hpp>
@@ -580,8 +576,8 @@ TEST(test_reader_writer, reader_starting_chunk_selection)
 
 // Helper to generate a string entry consiting of the entry_counter followed by
 // a random number of characters to reach target size
-auto generate_entry(std::size_t entry_counter,
-                    std::size_t target_size) -> std::string
+auto generate_entry(std::size_t entry_counter, std::size_t target_size)
+    -> std::string
 {
     std::string entry = std::to_string(entry_counter);
     while (entry.size() < target_size)
