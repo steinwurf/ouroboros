@@ -6,7 +6,7 @@ every change, see the Git log.
 
 Latest
 ------
-* tbd
+* Minor: License changed from proprietary to MIT.
 
 1.0.0
 -----

@@ -30,19 +30,19 @@ Quick Start 🚀
 
     #include <ouroboros/writer.hpp>
     #include <ouroboros/reader.hpp>
-    
+
     // Create a writer
     ouroboros::writer writer;
     writer.configure(buffer, chunk_target_size, chunk_count);
-    
+
     // Write some logs
     writer.write("Hello, world!");
     writer.write("This is a log entry");
-    
+
     // Create a reader
     ouroboros::reader reader;
     reader.configure(buffer);
-    
+
     // Read logs
     auto entry = reader.read_next();
     if (entry.has_value()) {
@@ -55,12 +55,12 @@ Or use shared memory for inter-process logging:
 
     #include <ouroboros/shm_log_writer.hpp>
     #include <ouroboros/shm_log_reader.hpp>
-    
+
     // Writer process
     ouroboros::shm_log_writer writer;
     writer.configure("/my_log", 1024, 4);
     writer.write("Process A says hello!");
-    
+
     // Reader process (different process)
     ouroboros::shm_log_reader reader;
     reader.configure("/my_log");
@@ -74,7 +74,7 @@ Building 🏗️
     # Using CMake
     cmake -B build
     cmake --build build
-    
+
     # Or using Waf
     python3 waf configure
     python3 waf build
@@ -138,5 +138,4 @@ Requirements 📦
 License 📜
 ----------
 
-Copyright (c) 2023 Steinwurf ApS. All Rights Reserved.
-
+Copyright (c) 2026 Steinwurf ApS. See LICENSE.rst for details.

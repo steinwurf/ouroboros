@@ -1,9 +1,5 @@
-// Copyright (c) 2023 Steinwurf ApS
-// All Rights Reserved
-//
-// THIS IS UNPUBLISHED PROPRIETARY SOURCE CODE OF STEINWURF
-// The copyright notice above does not evidence any
-// actual or intended publication of such source code.
+// Copyright (c) 2026 Steinwurf ApS
+// SPDX-License-Identifier: MIT
 
 #include <CLI/CLI.hpp>
 #include <ouroboros/reader.hpp>

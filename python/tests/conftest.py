@@ -1,3 +1,5 @@
+# Copyright (c) 2026 Steinwurf ApS
+# SPDX-License-Identifier: MIT
 """Pytest configuration and fixtures for ouroboros_py tests."""
 
 import json
