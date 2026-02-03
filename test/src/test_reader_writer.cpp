@@ -576,8 +576,8 @@ TEST(test_reader_writer, reader_starting_chunk_selection)
 
 // Helper to generate a string entry consiting of the entry_counter followed by
 // a random number of characters to reach target size
-auto generate_entry(std::size_t entry_counter, std::size_t target_size)
-    -> std::string
+auto generate_entry(std::size_t entry_counter,
+                    std::size_t target_size) -> std::string
 {
     std::string entry = std::to_string(entry_counter);
     while (entry.size() < target_size)

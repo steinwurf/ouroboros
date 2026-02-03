@@ -95,8 +95,8 @@ inline constexpr auto chunk_token(std::span<Byte> buffer)
 /// Calculate the size of the buffer header needed for a given chunk count
 /// @param chunk_count The number of chunks
 /// @return The size of the buffer header needed for the given chunk count
-inline constexpr auto compute_buffer_header_size(std::size_t chunk_count)
-    -> std::size_t
+inline constexpr auto
+compute_buffer_header_size(std::size_t chunk_count) -> std::size_t
 {
     return buffer_header_size + (chunk_count * chunk_row_size);
 }
@@ -110,9 +110,9 @@ inline constexpr auto compute_buffer_header_size(std::size_t chunk_count)
 /// @param chunk_count The number of chunks
 /// @return The size of the buffer needed for the given chunk target size and
 /// chunk count
-inline constexpr auto compute_buffer_size(std::size_t chunk_target_size,
-                                          std::size_t chunk_count)
-    -> std::size_t
+inline constexpr auto
+compute_buffer_size(std::size_t chunk_target_size,
+                    std::size_t chunk_count) -> std::size_t
 {
     return compute_buffer_header_size(chunk_count) +
            (chunk_target_size * chunk_count);
@@ -122,8 +122,8 @@ inline constexpr auto compute_buffer_size(std::size_t chunk_target_size,
 /// @param size The size to align
 /// @param align The alignment requirement (must be a power of 2)
 /// @return The aligned size
-inline constexpr auto align_up(std::size_t size, std::size_t align)
-    -> std::size_t
+inline constexpr auto align_up(std::size_t size,
+                               std::size_t align) -> std::size_t
 {
     return (size + align - 1) & ~(align - 1);
 }
