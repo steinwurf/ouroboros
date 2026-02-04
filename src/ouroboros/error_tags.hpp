@@ -9,6 +9,7 @@ ERROR_TAG(invalid_chunk_count, "Invalid chunk count.")
 ERROR_TAG(buffer_too_small, "Buffer too small for chunks.")
 ERROR_TAG(no_data_available, "No data available to read.")
 ERROR_TAG(entry_not_valid, "Entry not valid.")
+ERROR_TAG(writer_finished, "Writer has finished; no more data will be written.")
 ERROR_TAG(shared_memory_exists, "Shared memory segment already exists.")
 ERROR_TAG(shared_memory_create_failed,
           "Failed to create shared memory segment.")

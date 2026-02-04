@@ -49,6 +49,7 @@ var (
 	ErrInvalidChunkCount  = errors.New("chunk count is zero")
 	ErrBufferTooSmall     = errors.New("buffer too small")
 	ErrNoDataAvailable    = errors.New("no data available in buffer")
+	ErrWriterFinished     = errors.New("writer has finished; no more data will be written")
 	ErrReaderNotAttached  = errors.New("reader not attached to buffer")
 )
 
@@ -89,6 +90,7 @@ type Reader struct {
 	offset             uint64    // current read position
 	totalEntriesRead   uint64
 	entriesReadInChunk uint64
+	writerFinished     bool
 }
 
 // NewReader creates a reader for the given shared memory name.
@@ -268,17 +270,23 @@ func (r *Reader) jumpToChunk(chunkIndex int) bool {
 	return true
 }
 
-// ReadNextEntry reads the next entry from the log. Returns nil if no data available.
-func (r *Reader) ReadNextEntry() *Entry {
+// ReadNextEntry reads the next entry from the log.
+// Returns (nil, nil) if no data available.
+// Returns (nil, ErrWriterFinished) when the writer has finished.
+func (r *Reader) ReadNextEntry() (*Entry, error) {
 	if r.buffer == nil {
 		panic(ErrReaderNotAttached)
+	}
+
+	if r.writerFinished {
+		return nil, ErrWriterFinished
 	}
 
 	for {
 		// Implicit wrap: no room for header
 		if r.offset+EntryHeaderSize > uint64(len(r.buffer)) {
 			if !r.jumpToChunk(0) {
-				return nil
+				return nil, nil
 			}
 			continue
 		}
@@ -289,7 +297,7 @@ func (r *Reader) ReadNextEntry() *Entry {
 			nextInfo := getChunkInfo(r.buffer, nextIndex)
 			if nextInfo.IsCommitted && r.offset == nextInfo.Offset {
 				if nextInfo.Token <= r.currentChunk.Token {
-					return nil
+					return nil, nil
 				}
 				r.setCurrentChunk(nextInfo)
 				continue
@@ -304,30 +312,37 @@ func (r *Reader) ReadNextEntry() *Entry {
 		if !info.IsCommitted || info.Token != r.currentChunk.Token {
 			latest := r.findChunkWithHighestToken()
 			if !latest.IsCommitted {
-				return nil
+				return nil, nil
 			}
 			if latest.Token <= r.currentChunk.Token {
-				return nil
+				return nil, nil
 			}
 			r.setCurrentChunk(latest)
 			continue
 		}
 
 		if !isCommitted32(lengthWithFlag) {
-			return nil
+			return nil, nil
 		}
 
 		length := uint64(clearCommit32(lengthWithFlag))
 
 		if length == 0 {
-			return nil
+			return nil, nil
 		}
 
 		if length == 1 {
 			if !r.jumpToChunk(0) {
-				return nil
+				return nil, nil
 			}
 			continue
+		}
+
+		if length == 3 {
+			r.offset += EntryHeaderSize
+			r.offset = alignUp(r.offset, EntryAlignment)
+			r.writerFinished = true
+			return nil, ErrWriterFinished
 		}
 
 		if length < EntryHeaderSize {
@@ -356,33 +371,42 @@ func (r *Reader) ReadNextEntry() *Entry {
 			ChunkInfo:      r.currentChunk,
 			SequenceNumber: seqNum,
 			chunkRowView:   chunkRowView,
-		}
+		}, nil
 	}
 }
 
-// ReadNext reads the next entry as a string (UTF-8). Returns empty string if none.
-func (r *Reader) ReadNext() string {
-	entry := r.ReadNextEntry()
+// ReadNext reads the next entry as a string (UTF-8).
+// Returns ("", nil) if no data available.
+// Returns ("", ErrWriterFinished) when the writer has finished.
+func (r *Reader) ReadNext() (string, error) {
+	entry, err := r.ReadNextEntry()
+	if err != nil {
+		return "", err
+	}
 	if entry == nil {
-		return ""
+		return "", nil
 	}
 	if !entry.IsValid() {
-		return ""
+		return "", nil
 	}
-	return string(entry.Data)
+	return string(entry.Data), nil
 }
 
 // ReadAll reads all available entries.
-func (r *Reader) ReadAll() []*Entry {
+// Returns ErrWriterFinished if the writer finishes before all entries are read.
+func (r *Reader) ReadAll() ([]*Entry, error) {
 	var entries []*Entry
 	for {
-		entry := r.ReadNextEntry()
+		entry, err := r.ReadNextEntry()
+		if err != nil {
+			return entries, err
+		}
 		if entry == nil {
 			break
 		}
 		entries = append(entries, entry)
 	}
-	return entries
+	return entries, nil
 }
 
 // TotalEntriesRead returns the total number of entries read.

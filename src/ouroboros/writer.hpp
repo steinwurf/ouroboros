@@ -91,7 +91,9 @@ inline namespace STEINWURF_OUROBOROS_VERSION
 /// - Length 1: Means that the writer has wrapped the buffer and that
 ///             the reader should jump to the first chunk.
 /// - Length 2: Reserved.
-/// - Length 3: Reserved.
+/// - Length 3: Indicates that the writer has finished; no more data will be
+///             written. The reader should unlink shared memory and return
+///             writer_finished on all subsequent reads.
 ///
 /// The commit flag is written last by the writer and is the sole indicator
 /// of entry validity. Readers must never consume entries that are not
@@ -215,10 +217,12 @@ public:
 
             // Wrap the buffer
             m_current_chunk_index = 0;
-            m_offset = detail::buffer_format::buffer_header_size +
-                       (m_chunk_count * detail::buffer_format::chunk_row_size);
-            m_offset = detail::buffer_format::align_up(
-                m_offset, detail::buffer_format::entry_alignment);
+            m_offset = detail::buffer_format::compute_buffer_header_size(
+                m_chunk_count);
+            // Verify that the offset is aligned to the entry alignment
+            VERIFY(m_offset % detail::buffer_format::entry_alignment == 0,
+                   "Offset is not aligned to entry alignment", m_offset,
+                   detail::buffer_format::entry_alignment);
             initialize_chunk(chunk_row(m_current_chunk_index), m_offset,
                              m_total_entries_written);
         }
@@ -314,6 +318,61 @@ public:
         if (!is_chunk_committed(m_current_chunk_index))
         {
             // Commit the chunk since we now have entries in the chunk
+            commit_chunk(m_current_chunk_index);
+        }
+    }
+
+    /// Signal that the writer has finished; no more data will be written.
+    ///
+    /// Writes a special entry (length 3) that tells readers the log is
+    /// complete. Readers will return writer_finished and unlink shared memory
+    /// upon receiving this signal.
+    void finish()
+    {
+        VERIFY(!m_buffer.empty(), "Writer not configured");
+        VERIFY(m_offset != 0, "Writer not properly configured - offset is 0");
+
+        // Align offset to 4-byte boundary for entry header
+        m_offset = detail::buffer_format::align_up(
+            m_offset, detail::buffer_format::entry_alignment);
+
+        // Check if we have space for the finish entry (header only)
+        const std::size_t remaining_space =
+            (m_offset > m_buffer.size()) ? 0 : m_buffer.size() - m_offset;
+        if (remaining_space < detail::buffer_format::entry_header_size)
+        {
+            // Wrap first, then write finish
+            if (remaining_space >= detail::buffer_format::entry_header_size)
+            {
+                auto header =
+                    detail::buffer_format::entry_header(m_buffer.subspan(
+                        m_offset, detail::buffer_format::entry_header_size));
+                detail::atomic::store_release(header,
+                                              detail::buffer_format::set_commit(
+                                                  static_cast<uint32_t>(1)));
+            }
+            m_current_chunk_index = 0;
+            m_offset = detail::buffer_format::compute_buffer_header_size(
+                m_chunk_count);
+            // Verify that the offset is aligned to the entry alignment
+            VERIFY(m_offset % detail::buffer_format::entry_alignment == 0,
+                   "Offset is not aligned to entry alignment", m_offset,
+                   detail::buffer_format::entry_alignment);
+            initialize_chunk(chunk_row(m_current_chunk_index), m_offset,
+                             m_total_entries_written);
+        }
+
+        auto header = detail::buffer_format::entry_header(m_buffer.subspan(
+            m_offset, detail::buffer_format::entry_header_size));
+
+        constexpr uint32_t finish_entry_length = 3;
+        detail::atomic::store_release(
+            header, detail::buffer_format::set_commit(finish_entry_length));
+
+        m_offset += detail::buffer_format::entry_header_size;
+
+        if (!is_chunk_committed(m_current_chunk_index))
+        {
             commit_chunk(m_current_chunk_index);
         }
     }

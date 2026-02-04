@@ -84,10 +84,9 @@ public:
     /// @param should_unlink If true, unlink the shared memory segment on
     ///                      destruction (default: true)
     /// @return Error if configuration fails
-    auto
-    configure(const std::string& shm_name, std::size_t chunk_target_size,
-              std::size_t chunk_count,
-              bool should_unlink = true) -> tl::expected<void, std::error_code>
+    auto configure(const std::string& shm_name, std::size_t chunk_target_size,
+                   std::size_t chunk_count, bool should_unlink = true)
+        -> tl::expected<void, std::error_code>
     {
         VERIFY(chunk_count > 0, "chunk_count must be greater than 0");
         VERIFY(!shm_name.empty(), "shm_name must not be empty");
@@ -125,9 +124,18 @@ public:
     /// Write an entry to the log
     /// @param entry The entry payload data to write
     void write(std::string_view entry)
-
     {
         m_writer.write(entry);
+    }
+
+    /// Signal that the writer has finished; no more data will be written.
+    ///
+    /// Writes a special entry that tells readers the log is complete. Readers
+    /// will return writer_finished and unlink shared memory upon receiving
+    /// this.
+    void finish()
+    {
+        m_writer.finish();
     }
 
     /// Get the maximum entry size that can be written

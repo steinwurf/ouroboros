@@ -191,6 +191,7 @@ public:
         m_buffer = buffer;
         m_chunk_count = chunk_count;
         m_total_entries_read = 0;
+        m_writer_finished = false;
         set_current_chunk(start);
 
         return {};
@@ -203,6 +204,13 @@ public:
         VERIFY(m_offset % detail::buffer_format::entry_alignment == 0,
                "Offset not aligned", m_offset,
                detail::buffer_format::entry_alignment);
+
+        if (m_writer_finished)
+        {
+            return tl::make_unexpected(
+                make_error_code(ouroboros::error::writer_finished));
+        }
+
         // Retry loop: wrap / stale chunk / uncommitted entry all resolve by
         // either jumping and retrying, or returning no_data().
         for (;;)
@@ -328,6 +336,18 @@ public:
                 }
 
                 continue;
+            }
+
+            if (length == 3)
+            {
+                // The entry length is 3 which means the writer has finished.
+                // Advance past the entry header and mark as finished.
+                m_offset += detail::buffer_format::entry_header_size;
+                m_offset = detail::buffer_format::align_up(
+                    m_offset, detail::buffer_format::entry_alignment);
+                m_writer_finished = true;
+                return tl::make_unexpected(
+                    make_error_code(ouroboros::error::writer_finished));
             }
 
             // Check if the entry length is valid.
@@ -456,8 +476,8 @@ private:
     }
 
     static auto find_chunk(std::span<const uint8_t> buffer,
-                           std::size_t chunk_count,
-                           read_strategy strategy) -> chunk_info
+                           std::size_t chunk_count, read_strategy strategy)
+        -> chunk_info
     {
         switch (strategy)
         {
@@ -482,9 +502,9 @@ private:
         return {};
     }
 
-    static auto
-    find_chunk_with_highest_token(std::span<const uint8_t> buffer,
-                                  std::size_t chunk_count) -> chunk_info
+    static auto find_chunk_with_highest_token(std::span<const uint8_t> buffer,
+                                              std::size_t chunk_count)
+        -> chunk_info
     {
         chunk_info best_chunk = get_chunk_info(buffer, 0);
         for (std::size_t i = 1; i < chunk_count; ++i)
@@ -508,9 +528,9 @@ private:
         return best_chunk;
     }
 
-    static auto
-    find_chunk_with_lowest_token(std::span<const uint8_t> buffer,
-                                 std::size_t chunk_count) -> chunk_info
+    static auto find_chunk_with_lowest_token(std::span<const uint8_t> buffer,
+                                             std::size_t chunk_count)
+        -> chunk_info
     {
         chunk_info best_chunk = get_chunk_info(buffer, 0);
         for (std::size_t i = 1; i < chunk_count; ++i)
@@ -538,6 +558,7 @@ private:
     std::span<const uint8_t> m_buffer;
 
     chunk_info m_current_chunk;
+    bool m_writer_finished = false;
     std::size_t m_offset = 0;
     std::size_t m_total_entries_read = 0;
     std::size_t m_entries_read_in_current_chunk = 0;

@@ -152,6 +152,51 @@ TEST(test_shm, writer_write_multiple_entries)
     EXPECT_FALSE(no_more.has_value());
 }
 
+TEST(test_shm, writer_finish_reader_unlinks_shm)
+{
+    constexpr std::size_t chunk_target_size = 1024;
+    constexpr std::size_t chunk_count = 4;
+    auto shm_name = generate_shm_name();
+
+    ouroboros::shm_log_writer writer;
+    auto writer_result =
+        writer.configure(shm_name, chunk_target_size, chunk_count, false);
+    ASSERT_TRUE(writer_result.has_value());
+
+    writer.write("Entry 1");
+    writer.write("Entry 2");
+    writer.finish();
+
+    ouroboros::shm_log_reader reader;
+    auto reader_result = reader.configure(shm_name);
+    ASSERT_TRUE(reader_result.has_value());
+
+    auto entry1 = reader.read_next_entry();
+    ASSERT_TRUE(entry1.has_value());
+    EXPECT_EQ(entry1->data, "Entry 1");
+
+    auto entry2 = reader.read_next_entry();
+    ASSERT_TRUE(entry2.has_value());
+    EXPECT_EQ(entry2->data, "Entry 2");
+
+    // After finish entry, reader returns writer_finished and unlinks shm
+    auto finish_result = reader.read_next_entry();
+    ASSERT_FALSE(finish_result.has_value());
+    EXPECT_EQ(finish_result.error(),
+              ouroboros::make_error_code(ouroboros::error::writer_finished));
+
+    // Subsequent reads keep returning writer_finished
+    auto subsequent = reader.read_next_entry();
+    ASSERT_FALSE(subsequent.has_value());
+    EXPECT_EQ(subsequent.error(),
+              ouroboros::make_error_code(ouroboros::error::writer_finished));
+
+    // Shared memory should have been unlinked - new reader cannot attach
+    ouroboros::shm_log_reader reader2;
+    auto attach_result = reader2.configure(shm_name);
+    EXPECT_FALSE(attach_result.has_value());
+}
+
 TEST(test_shm, reader_empty_buffer_handling)
 {
     constexpr std::size_t chunk_target_size = 1024;

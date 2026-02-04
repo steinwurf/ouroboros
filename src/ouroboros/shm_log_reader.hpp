@@ -11,6 +11,7 @@
 #include <string>
 #include <string_view>
 
+#include "error_code.hpp"
 #include "reader.hpp"
 #include "shm_platform.hpp"
 #include "version.hpp"
@@ -41,11 +42,13 @@ public:
         m_reader(std::move(other.m_reader)),
         m_shm_name(std::move(other.m_shm_name)),
         m_shm_handle(other.m_shm_handle), m_buffer_ptr(other.m_buffer_ptr),
-        m_buffer_size(other.m_buffer_size)
+        m_buffer_size(other.m_buffer_size),
+        m_writer_finished(other.m_writer_finished)
     {
         other.m_shm_handle = shm_handle{};
         other.m_buffer_ptr = nullptr;
         other.m_buffer_size = 0;
+        other.m_writer_finished = false;
     }
 
     /// Move assignment
@@ -59,10 +62,12 @@ public:
             m_shm_handle = other.m_shm_handle;
             m_buffer_ptr = other.m_buffer_ptr;
             m_buffer_size = other.m_buffer_size;
+            m_writer_finished = other.m_writer_finished;
 
             other.m_shm_handle = shm_handle{};
             other.m_buffer_ptr = nullptr;
             other.m_buffer_size = 0;
+            other.m_writer_finished = false;
         }
         return *this;
     }
@@ -114,14 +119,46 @@ public:
     /// @return The entry or an error
     auto read_next_entry() -> tl::expected<reader::entry, std::error_code>
     {
-        return m_reader.read_next_entry();
+        if (m_writer_finished)
+        {
+            return tl::make_unexpected(make_error_code(error::writer_finished));
+        }
+
+        auto result = m_reader.read_next_entry();
+        if (!result &&
+            result.error() == make_error_code(error::writer_finished))
+        {
+            m_writer_finished = true;
+            if (!m_shm_name.empty())
+            {
+                unlink_shm(m_shm_name);
+            }
+            cleanup();
+        }
+        return result;
     }
 
     /// Read the next entry and return as string
     /// @return The entry data as string or an error
     auto read_next() -> tl::expected<std::string, std::error_code>
     {
-        return m_reader.read_next();
+        if (m_writer_finished)
+        {
+            return tl::make_unexpected(make_error_code(error::writer_finished));
+        }
+
+        auto result = m_reader.read_next();
+        if (!result &&
+            result.error() == make_error_code(error::writer_finished))
+        {
+            m_writer_finished = true;
+            if (!m_shm_name.empty())
+            {
+                unlink_shm(m_shm_name);
+            }
+            cleanup();
+        }
+        return result;
     }
 
     /// Get the chunk count
@@ -181,6 +218,7 @@ private:
     shm_handle m_shm_handle;
     void* m_buffer_ptr = nullptr;
     std::size_t m_buffer_size = 0;
+    bool m_writer_finished = false;
 };
 }
 }

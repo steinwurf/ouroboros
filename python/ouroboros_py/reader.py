@@ -214,6 +214,7 @@ class Reader:
         self._offset = 0
         self._total_entries_read = 0
         self._entries_read_in_current_chunk = 0
+        self._writer_finished = False
 
         log.debug("Creating Reader for shared memory '%s'", self._name)
         self._attach()
@@ -394,10 +395,15 @@ class Reader:
         """Read the next entry from the log, returning None if no data available.
 
         Returns:
-            Entry with data and chunk info, or None if no entry is available.
+            Entry with data and chunk info, or None if no entry is available
+            (including when the writer has finished). Check :attr:`writer_finished`
+            after getting None to distinguish "no data yet" from "writer done".
         """
         if self._buffer is None:
             raise ReaderError("Reader not attached to buffer")
+
+        if self._writer_finished:
+            return None
 
         # Retry loop: wrap / stale chunk / uncommitted entry all resolve by
         # either jumping and retrying, or returning None.
@@ -468,6 +474,16 @@ class Reader:
                     log.debug("read_next_entry: jump_to_chunk(0) failed, None")
                     return None
                 continue
+
+            if length == 3:
+                log.debug(
+                    "read_next_entry: offset=%d length=3 (writer finished)",
+                    self._offset,
+                )
+                self._offset += ENTRY_HEADER_SIZE
+                self._offset = _align_up(self._offset, ENTRY_ALIGNMENT)
+                self._writer_finished = True
+                return None
 
             # Validate length
             if length < ENTRY_HEADER_SIZE:
@@ -541,7 +557,8 @@ class Reader:
         """Read the next available entry as a string, if any.
 
         Returns one payload decoded as UTF-8 or None when no data is available
-        yet (or when all data has been read), or when the entry was overwritten.
+        yet (or when the writer has finished), or when the entry was overwritten.
+        Check :attr:`writer_finished` after getting None to distinguish cases.
 
         Returns:
             Payload decoded as UTF-8 string, or None if no entry is available.
@@ -557,11 +574,12 @@ class Reader:
     def read_all(self) -> List[Entry]:
         """Read all available entries from the log.
 
+        Stops when no more data is available (including when the writer has
+        finished). Check :attr:`writer_finished` after the call to see if the
+        writer explicitly finished.
+
         Returns:
             List of Entry objects for all entries in order
-
-        Raises:
-            ReaderError: If reading fails
         """
         log.debug("read_all() called on Reader for shm '%s'", self._name)
         entries: List[Entry] = []
@@ -579,6 +597,9 @@ class Reader:
 
     def __iter__(self) -> Iterator[Entry]:
         """Iterate over all available entries.
+
+        Stops when no more data is available. Check :attr:`writer_finished`
+        after the loop to see if the writer explicitly finished.
 
         Yields:
             Entry for each log entry in order
@@ -616,6 +637,16 @@ class Reader:
                 )
             self._shm = None
             self._buffer = None
+
+    @property
+    def writer_finished(self) -> bool:
+        """True if the writer has finished; no more data will be written.
+
+        After :meth:`read_next_entry` or :meth:`read_next` returns None, check
+        this to distinguish "no data yet" (poll again) from "writer done"
+        (stop reading, optionally unlink shared memory).
+        """
+        return self._writer_finished
 
     @property
     def total_entries_read(self) -> int:

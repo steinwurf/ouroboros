@@ -576,8 +576,8 @@ TEST(test_reader_writer, reader_starting_chunk_selection)
 
 // Helper to generate a string entry consiting of the entry_counter followed by
 // a random number of characters to reach target size
-auto generate_entry(std::size_t entry_counter,
-                    std::size_t target_size) -> std::string
+auto generate_entry(std::size_t entry_counter, std::size_t target_size)
+    -> std::string
 {
     std::string entry = std::to_string(entry_counter);
     while (entry.size() < target_size)
@@ -707,6 +707,47 @@ TEST(test_reader_writer, reader_writer_interleaved_operations)
     ASSERT_FALSE(entry4.has_value());
     EXPECT_EQ(entry4.error(),
               ouroboros::make_error_code(ouroboros::error::no_data_available));
+}
+
+TEST(test_reader_writer, writer_finish_reader_returns_writer_finished)
+{
+    constexpr std::size_t chunk_target_size = 1024;
+    constexpr std::size_t chunk_count = 4;
+    auto buffer_size = ouroboros::detail::buffer_format::compute_buffer_size(
+        chunk_target_size, chunk_count);
+    auto buffer = create_aligned_buffer(buffer_size);
+    std::span<uint8_t> buffer_span(buffer);
+
+    ouroboros::writer writer;
+    writer.configure(buffer_span, chunk_target_size, chunk_count);
+
+    writer.write("First entry");
+    writer.write("Second entry");
+    writer.finish();
+
+    ouroboros::reader reader;
+    auto result = reader.configure(std::span<const uint8_t>(buffer_span));
+    ASSERT_TRUE(result.has_value());
+
+    auto entry1 = reader.read_next_entry();
+    ASSERT_TRUE(entry1.has_value());
+    EXPECT_EQ(entry1->data, "First entry");
+
+    auto entry2 = reader.read_next_entry();
+    ASSERT_TRUE(entry2.has_value());
+    EXPECT_EQ(entry2->data, "Second entry");
+
+    // After finish, reader should return writer_finished
+    auto finish_result = reader.read_next_entry();
+    ASSERT_FALSE(finish_result.has_value());
+    EXPECT_EQ(finish_result.error(),
+              ouroboros::make_error_code(ouroboros::error::writer_finished));
+
+    // Subsequent reads should also return writer_finished
+    auto subsequent_result = reader.read_next_entry();
+    ASSERT_FALSE(subsequent_result.has_value());
+    EXPECT_EQ(subsequent_result.error(),
+              ouroboros::make_error_code(ouroboros::error::writer_finished));
 }
 
 TEST(test_reader_writer, reader_handles_rapid_writes)
