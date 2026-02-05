@@ -62,12 +62,13 @@ inline namespace STEINWURF_OUROBOROS_VERSION
 /// 0      | 8    | Magic bytes "OUROBLOG"
 /// 8      | 4    | Version
 /// 12     | 4    | Chunk count N
+/// 16     | 8    | Buffer ID (64-bit, configured by writer)
 ///  Chunk infos
-/// 16     | 8    | Chunk 1 offset with MSB indicating commitment
-/// 24     | 8    | Chunk 1 token
+/// 24     | 8    | Chunk 1 offset with MSB indicating commitment
+/// 32     | 8    | Chunk 1 token
 /// ...    | ...  | ...
-/// N*16   | 8    | Chunk N offset
-/// N*16+8 | 8    | Chunk N token
+/// 24+N*16| 8    | Chunk N offset
+/// 24+N*16+8 | 8  | Chunk N token
 /// -------|------|-----------------------------------------------
 /// When writing the buffer the magic bytes are written last to ensure that
 /// readers can detect a fully initialized buffer.
@@ -134,8 +135,10 @@ public:
     ///               (chunk_count * chunk_target_size) bytes)
     /// @param chunk_target_size Target size of each chunk in bytes
     /// @param chunk_count Number of chunks (must be > 0)
+    /// @param buffer_id 64-bit ID stored in the buffer header (e.g. for
+    ///                  identifying the log instance)
     void configure(std::span<uint8_t> buffer, std::size_t chunk_target_size,
-                   std::size_t chunk_count)
+                   std::size_t chunk_count, uint64_t buffer_id = 0)
     {
         VERIFY(buffer.data() != nullptr, "Buffer span must not be null!");
         VERIFY(buffer.size() > 0, "Buffer span must not be empty!");
@@ -152,8 +155,10 @@ public:
 
         m_chunk_target_size = chunk_target_size;
         m_chunk_count = chunk_count;
+        m_buffer_id = buffer_id;
         m_buffer = buffer;
         m_total_entries_written = 0;
+        m_finished = false;
 
         // Zero initialize chunk table first
         std::memset(m_buffer.data() + detail::buffer_format::buffer_header_size,
@@ -163,7 +168,7 @@ public:
         // buffer)
         write_header(
             m_buffer.subspan(0, detail::buffer_format::buffer_header_size),
-            static_cast<uint32_t>(chunk_count));
+            static_cast<uint32_t>(chunk_count), buffer_id);
 
         // Initialize first chunk
         m_current_chunk_index = 0;
@@ -181,6 +186,7 @@ public:
     {
         VERIFY(!m_buffer.empty(), "Writer not configured");
         VERIFY(m_offset != 0, "Writer not properly configured - offset is 0");
+        VERIFY(!m_finished, "Writer has already finished");
         VERIFY(entry.data() != nullptr, "Entry payload must not be null");
         VERIFY(entry.size() > 0, "Entry size must be greater than 0");
 
@@ -331,6 +337,7 @@ public:
     {
         VERIFY(!m_buffer.empty(), "Writer not configured");
         VERIFY(m_offset != 0, "Writer not properly configured - offset is 0");
+        VERIFY(!m_finished, "Writer has already finished");
 
         // Align offset to 4-byte boundary for entry header
         m_offset = detail::buffer_format::align_up(
@@ -375,6 +382,8 @@ public:
         {
             commit_chunk(m_current_chunk_index);
         }
+
+        m_finished = true;
     }
 
     /// Get the maximum entry size that can be written.
@@ -408,6 +417,13 @@ public:
     auto total_entries_written() const -> std::size_t
     {
         return m_total_entries_written;
+    }
+
+    /// Get the buffer ID configured at setup.
+    /// @return The 64-bit buffer ID
+    auto buffer_id() const -> uint64_t
+    {
+        return m_buffer_id;
     }
 
 private:
@@ -475,7 +491,8 @@ private:
         std::memcpy(buffer.data(), &value, sizeof(value));
     }
 
-    void write_header(std::span<uint8_t> buffer, uint32_t chunk_count)
+    void write_header(std::span<uint8_t> buffer, uint32_t chunk_count,
+                      uint64_t buffer_id)
     {
         VERIFY(buffer.size() >= detail::buffer_format::buffer_header_size,
                "Buffer size must be at least {}",
@@ -492,6 +509,13 @@ private:
         // Offset 12: Chunk count (4 bytes)
         write_value(buffer.subspan(12, 4), chunk_count);
 
+        // Offset 16: Buffer ID (8 bytes) - written atomically for reader
+        // restart detection
+        detail::atomic::store_release(
+            reinterpret_cast<uint64_t*>(
+                buffer.data() + detail::buffer_format::buffer_id_offset),
+            buffer_id);
+
         // Offset 0: Magic value (8 bytes) - written atomically with release
         // semantics
         detail::atomic::store_release(
@@ -502,12 +526,14 @@ private:
 private:
     std::size_t m_chunk_target_size = 0;
     std::size_t m_chunk_count = 0;
+    uint64_t m_buffer_id = 0;
     std::span<uint8_t> m_buffer;
 
     // Writer state
     std::size_t m_current_chunk_index = 0;
     uint64_t m_total_entries_written = 0;
     std::size_t m_offset = 0;
+    bool m_finished = false;
 };
 }
 }

@@ -32,11 +32,16 @@ func readValueU32(b []byte, offset uint64) uint32 {
 	return binary.LittleEndian.Uint32(b[offset:])
 }
 
+// readValueU64 reads a uint64 with plain memcpy (matching C++ read_value).
+func readValueU64(b []byte, offset uint64) uint64 {
+	return binary.LittleEndian.Uint64(b[offset:])
+}
+
 // Buffer format constants (matching C++ buffer_format.hpp)
 const (
 	Magic            = 0x4F55524F424C4F47 // "OUROBLOG"
-	Version          = 1
-	BufferHeaderSize = 16
+	Version          = 2
+	BufferHeaderSize = 24
 	ChunkRowSize     = 16
 	EntryHeaderSize  = 4
 	EntryAlignment   = 4
@@ -50,6 +55,7 @@ var (
 	ErrBufferTooSmall     = errors.New("buffer too small")
 	ErrNoDataAvailable    = errors.New("no data available in buffer")
 	ErrWriterFinished     = errors.New("writer has finished; no more data will be written")
+	ErrBufferRestarted    = errors.New("buffer was restarted; reader must reconfigure")
 	ErrReaderNotAttached  = errors.New("reader not attached to buffer")
 )
 
@@ -86,6 +92,7 @@ type Reader struct {
 	file               *os.File
 	buffer             []byte
 	chunkCount         uint32
+	bufferID           uint64
 	currentChunk       ChunkInfo // cached; use for offset/token/index
 	offset             uint64    // current read position
 	totalEntriesRead   uint64
@@ -144,6 +151,7 @@ func (r *Reader) attach() error {
 	}
 
 	r.chunkCount = readValueU32(r.buffer, 12)
+	r.bufferID = loadAcquireU64(r.buffer, 16)
 	if r.chunkCount == 0 {
 		r.close()
 		return ErrInvalidChunkCount
@@ -283,6 +291,12 @@ func (r *Reader) ReadNextEntry() (*Entry, error) {
 	}
 
 	for {
+		// Check if buffer was restarted (ID changed); reader must reconfigure
+		currentID := loadAcquireU64(r.buffer, 16)
+		if currentID != r.bufferID {
+			return nil, ErrBufferRestarted
+		}
+
 		// Implicit wrap: no room for header
 		if r.offset+EntryHeaderSize > uint64(len(r.buffer)) {
 			if !r.jumpToChunk(0) {
@@ -412,6 +426,11 @@ func (r *Reader) ReadAll() ([]*Entry, error) {
 // TotalEntriesRead returns the total number of entries read.
 func (r *Reader) TotalEntriesRead() uint64 {
 	return r.totalEntriesRead
+}
+
+// BufferID returns the 64-bit buffer ID from the header.
+func (r *Reader) BufferID() uint64 {
+	return r.bufferID
 }
 
 // ChunkCount returns the number of chunks.

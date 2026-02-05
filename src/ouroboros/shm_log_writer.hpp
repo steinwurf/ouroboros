@@ -83,9 +83,11 @@ public:
     /// @param chunk_count Number of chunks (must be > 0)
     /// @param should_unlink If true, unlink the shared memory segment on
     ///                      destruction (default: true)
+    /// @param buffer_id 64-bit ID stored in the buffer header (default: 0)
     /// @return Error if configuration fails
     auto configure(const std::string& shm_name, std::size_t chunk_target_size,
-                   std::size_t chunk_count, bool should_unlink = true)
+                   std::size_t chunk_count, bool should_unlink = true,
+                   uint64_t buffer_id = 0)
         -> tl::expected<void, std::error_code>
     {
         VERIFY(chunk_count > 0, "chunk_count must be greater than 0");
@@ -116,7 +118,7 @@ public:
         m_writer.configure(
             std::span<uint8_t>(static_cast<uint8_t*>(m_buffer_ptr),
                                m_buffer_size),
-            chunk_target_size, chunk_count);
+            chunk_target_size, chunk_count, buffer_id);
 
         return {};
     }
@@ -157,6 +159,13 @@ public:
     auto chunk_count() const -> std::size_t
     {
         return m_writer.chunk_count();
+    }
+
+    /// Get the buffer ID from the header
+    /// @return The 64-bit buffer ID
+    auto buffer_id() const -> uint64_t
+    {
+        return m_writer.buffer_id();
     }
 
     /// Get the shared memory name

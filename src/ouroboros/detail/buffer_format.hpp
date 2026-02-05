@@ -25,10 +25,10 @@ namespace buffer_format
 constexpr static uint64_t magic = 0x4F55524F424C4F47ULL; // "OUROBLOG"
 
 /// Current buffer format version
-constexpr static uint32_t version = 1;
+constexpr static uint32_t version = 2;
 
 /// Size of the buffer header in bytes
-constexpr static uint32_t buffer_header_size = 16;
+constexpr static uint32_t buffer_header_size = 24;
 
 /// Size of a chunk row in the chunk table (8 bytes offset + 8 bytes token)
 constexpr static uint32_t chunk_row_size = 16;
@@ -95,8 +95,8 @@ inline constexpr auto chunk_token(std::span<Byte> buffer)
 /// Calculate the size of the buffer header needed for a given chunk count
 /// @param chunk_count The number of chunks
 /// @return The size of the buffer header needed for the given chunk count
-inline constexpr auto
-compute_buffer_header_size(std::size_t chunk_count) -> std::size_t
+inline constexpr auto compute_buffer_header_size(std::size_t chunk_count)
+    -> std::size_t
 {
     return buffer_header_size + (chunk_count * chunk_row_size);
 }
@@ -110,9 +110,9 @@ compute_buffer_header_size(std::size_t chunk_count) -> std::size_t
 /// @param chunk_count The number of chunks
 /// @return The size of the buffer needed for the given chunk target size and
 /// chunk count
-inline constexpr auto
-compute_buffer_size(std::size_t chunk_target_size,
-                    std::size_t chunk_count) -> std::size_t
+inline constexpr auto compute_buffer_size(std::size_t chunk_target_size,
+                                          std::size_t chunk_count)
+    -> std::size_t
 {
     return compute_buffer_header_size(chunk_count) +
            (chunk_target_size * chunk_count);
@@ -122,11 +122,15 @@ compute_buffer_size(std::size_t chunk_target_size,
 /// @param size The size to align
 /// @param align The alignment requirement (must be a power of 2)
 /// @return The aligned size
-inline constexpr auto align_up(std::size_t size,
-                               std::size_t align) -> std::size_t
+inline constexpr auto align_up(std::size_t size, std::size_t align)
+    -> std::size_t
 {
     return (size + align - 1) & ~(align - 1);
 }
+
+/// Offset of the buffer ID in the header (8 bytes, must be read/written
+/// atomically)
+constexpr static uint32_t buffer_id_offset = 16;
 
 /// Get the offset of a chunk row in the buffer
 /// @param chunk_index The index of the chunk

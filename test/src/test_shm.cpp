@@ -49,6 +49,29 @@ TEST(test_shm, writer_configure)
     EXPECT_GT(writer.max_entry_size(), 0U);
     EXPECT_EQ(writer.shm_name(), shm_name);
     EXPECT_GT(writer.buffer_size(), 0U);
+    EXPECT_EQ(writer.buffer_id(), 0U);
+}
+
+TEST(test_shm, buffer_id)
+{
+    constexpr std::size_t chunk_target_size = 1024;
+    constexpr std::size_t chunk_count = 4;
+    constexpr uint64_t test_buffer_id = 0xDEADBEEF12345678ULL;
+    auto shm_name = generate_shm_name();
+
+    ouroboros::shm_log_writer writer;
+    auto writer_result = writer.configure(shm_name, chunk_target_size,
+                                          chunk_count, false, test_buffer_id);
+    ASSERT_TRUE(writer_result.has_value());
+
+    EXPECT_EQ(writer.buffer_id(), test_buffer_id);
+
+    writer.write("test entry");
+
+    ouroboros::shm_log_reader reader;
+    auto reader_result = reader.configure(shm_name);
+    ASSERT_TRUE(reader_result.has_value());
+    EXPECT_EQ(reader.buffer_id(), test_buffer_id);
 }
 
 TEST(test_shm, reader_configure_before_writer)

@@ -165,6 +165,9 @@ public:
         }
         const std::size_t chunk_count =
             read_value<uint32_t>(buffer.data() + 12);
+        const uint64_t buffer_id =
+            detail::atomic::load_acquire(reinterpret_cast<const uint64_t*>(
+                buffer.data() + detail::buffer_format::buffer_id_offset));
 
         if (chunk_count == 0)
         {
@@ -190,6 +193,7 @@ public:
 
         m_buffer = buffer;
         m_chunk_count = chunk_count;
+        m_buffer_id = buffer_id;
         m_total_entries_read = 0;
         m_writer_finished = false;
         set_current_chunk(start);
@@ -215,6 +219,17 @@ public:
         // either jumping and retrying, or returning no_data().
         for (;;)
         {
+            // Check if buffer was restarted (ID changed); reader must
+            // reconfigure
+            const uint64_t current_id =
+                detail::atomic::load_acquire(reinterpret_cast<const uint64_t*>(
+                    m_buffer.data() + detail::buffer_format::buffer_id_offset));
+            if (current_id != m_buffer_id)
+            {
+                return tl::make_unexpected(
+                    make_error_code(ouroboros::error::buffer_restarted));
+            }
+
             VERIFY(m_offset % detail::buffer_format::entry_alignment == 0,
                    "Offset not aligned", m_offset,
                    detail::buffer_format::entry_alignment);
@@ -409,6 +424,13 @@ public:
         return m_chunk_count;
     }
 
+    /// Get the buffer ID from the header.
+    /// @return The 64-bit buffer ID configured by the writer
+    auto buffer_id() const -> uint64_t
+    {
+        return m_buffer_id;
+    }
+
     auto total_entries_read() const -> std::size_t
     {
         return m_total_entries_read;
@@ -555,6 +577,7 @@ private:
 
 private:
     std::size_t m_chunk_count = 0;
+    uint64_t m_buffer_id = 0;
     std::span<const uint8_t> m_buffer;
 
     chunk_info m_current_chunk;

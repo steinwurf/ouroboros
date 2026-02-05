@@ -17,8 +17,8 @@ log = logging.getLogger(__name__)
 
 # Buffer format constants (matching C++ buffer_format.hpp)
 MAGIC = 0x4F55524F424C4F47  # "OUROBLOG"
-VERSION = 1
-BUFFER_HEADER_SIZE = 16
+VERSION = 2
+BUFFER_HEADER_SIZE = 24
 CHUNK_ROW_SIZE = 16
 ENTRY_HEADER_SIZE = 4
 ENTRY_ALIGNMENT = 4
@@ -56,6 +56,12 @@ class BufferTooSmallError(ReaderError):
 
 class NoDataAvailableError(ReaderError):
     """Raised when no data is available to read."""
+
+    pass
+
+
+class BufferRestartedError(ReaderError):
+    """Raised when the buffer was restarted; reader must reconfigure."""
 
     pass
 
@@ -215,6 +221,7 @@ class Reader:
         self._total_entries_read = 0
         self._entries_read_in_current_chunk = 0
         self._writer_finished = False
+        self._buffer_id = 0
 
         log.debug("Creating Reader for shared memory '%s'", self._name)
         self._attach()
@@ -256,8 +263,10 @@ class Reader:
                 f"Unsupported buffer version: {version} (expected {VERSION})"
             )
 
-        # Read chunk count
+        # Read chunk count and buffer ID (ID uses atomic load for restart
+        # detection)
         self._chunk_count = _load_acquire_u32(self._buffer, 12)
+        self._buffer_id = _load_acquire_u64(self._buffer, 16)
         if self._chunk_count == 0:
             raise InvalidChunkCountError("Chunk count is zero")
 
@@ -408,6 +417,14 @@ class Reader:
         # Retry loop: wrap / stale chunk / uncommitted entry all resolve by
         # either jumping and retrying, or returning None.
         while True:
+            # Check if buffer was restarted (ID changed); reader must
+            # reconfigure
+            current_id = _load_acquire_u64(self._buffer, 16)
+            if current_id != self._buffer_id:
+                raise BufferRestartedError(
+                    "Buffer was restarted; reader must reconfigure"
+                )
+
             # Implicit wrap: no room for header
             if self._offset + ENTRY_HEADER_SIZE > len(self._buffer):
                 log.debug(
@@ -637,6 +654,11 @@ class Reader:
                 )
             self._shm = None
             self._buffer = None
+
+    @property
+    def buffer_id(self) -> int:
+        """Get the 64-bit buffer ID from the header."""
+        return self._buffer_id
 
     @property
     def writer_finished(self) -> bool:

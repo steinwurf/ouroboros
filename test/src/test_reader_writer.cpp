@@ -34,7 +34,7 @@ auto create_aligned_buffer(std::size_t size) -> std::vector<uint8_t>
 TEST(test_reader_writer, size_calculations)
 {
     constexpr std::size_t chunk_row_size = 16;
-    constexpr std::size_t buffer_header_size = 16;
+    constexpr std::size_t buffer_header_size = 24;
 
     /// Test cases: chunk_target_size, chunk_count, expected_size
     std::vector<std::tuple<std::size_t, std::size_t, std::size_t>> test_cases =
@@ -119,6 +119,70 @@ TEST(test_reader_writer, writer_configure)
     EXPECT_EQ(writer.chunk_target_size(), chunk_target_size);
     EXPECT_EQ(writer.chunk_count(), chunk_count);
     EXPECT_GT(writer.max_entry_size(), 0U);
+    EXPECT_EQ(writer.buffer_id(), 0U);
+}
+
+TEST(test_reader_writer, buffer_id)
+{
+    constexpr std::size_t chunk_target_size = 1024;
+    constexpr std::size_t chunk_count = 4;
+    constexpr uint64_t test_buffer_id = 0x123456789ABCDEF0ULL;
+    auto buffer_size = ouroboros::detail::buffer_format::compute_buffer_size(
+        chunk_target_size, chunk_count);
+    auto buffer = create_aligned_buffer(buffer_size);
+    std::span<uint8_t> buffer_span(buffer);
+
+    ouroboros::writer writer;
+    writer.configure(buffer_span, chunk_target_size, chunk_count,
+                     test_buffer_id);
+
+    EXPECT_EQ(writer.buffer_id(), test_buffer_id);
+
+    writer.write("test");
+
+    ouroboros::reader reader;
+    auto result = reader.configure(std::span<const uint8_t>(buffer_span));
+    ASSERT_TRUE(result.has_value());
+    EXPECT_EQ(reader.buffer_id(), test_buffer_id);
+}
+
+TEST(test_reader_writer, buffer_restarted_when_id_changes)
+{
+    constexpr std::size_t chunk_target_size = 1024;
+    constexpr std::size_t chunk_count = 4;
+    constexpr uint64_t initial_id = 1;
+    constexpr uint64_t new_id = 2;
+    auto buffer_size = ouroboros::detail::buffer_format::compute_buffer_size(
+        chunk_target_size, chunk_count);
+    auto buffer = create_aligned_buffer(buffer_size);
+    std::span<uint8_t> buffer_span(buffer);
+
+    ouroboros::writer writer;
+    writer.configure(buffer_span, chunk_target_size, chunk_count, initial_id);
+    writer.write("first");
+
+    ouroboros::reader reader;
+    auto result = reader.configure(std::span<const uint8_t>(buffer_span));
+    ASSERT_TRUE(result.has_value());
+
+    auto entry = reader.read_next_entry();
+    ASSERT_TRUE(entry.has_value());
+    EXPECT_EQ(entry->data, "first");
+
+    // Configure writer with new ID
+    writer.configure(buffer_span, chunk_target_size, chunk_count, new_id);
+    writer.write("second");
+
+    // Next read should return buffer_restarted
+    auto restart_result = reader.read_next_entry();
+    ASSERT_FALSE(restart_result.has_value());
+    EXPECT_EQ(restart_result.error(),
+              ouroboros::make_error_code(ouroboros::error::buffer_restarted));
+    reader.configure(std::span<const uint8_t>(buffer_span));
+    auto entry2 = reader.read_next_entry();
+    ASSERT_TRUE(entry2.has_value());
+    EXPECT_EQ(entry2->data, "second");
+    EXPECT_EQ(reader.buffer_id(), new_id);
 }
 
 TEST(test_reader_writer, writer_write_single_entry)
@@ -827,11 +891,11 @@ TEST(test_reader_writer, chunk_invalidation_and_wrap_sequence)
         ouroboros::detail::buffer_format::buffer_header_size +
         (chunk_count * ouroboros::detail::buffer_format::chunk_row_size);
     ASSERT_EQ(header_and_table,
-              80); // header_and_table = 16 + (4 * 16) = 80 bytes
-    // First chunk starts at 80, which is already 4-byte aligned
+              88); // header_and_table = 24 + (4 * 16) = 88 bytes
+    // First chunk starts at 88, which is already 4-byte aligned
     const std::size_t usable_space = buffer_size - header_and_table;
     ASSERT_EQ(usable_space,
-              1024); // usable_space = (16 + 64 + 1024) - 80 = 1024 bytes
+              1024); // usable_space = (24 + 64 + 1024) - 88 = 1024 bytes
 
     // Calculate entries per chunk
     constexpr std::size_t entries_per_chunk =

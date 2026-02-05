@@ -168,6 +168,13 @@ public:
         return m_reader.chunk_count();
     }
 
+    /// Get the buffer ID from the header
+    /// @return The 64-bit buffer ID
+    auto buffer_id() const -> uint64_t
+    {
+        return m_reader.buffer_id();
+    }
+
     /// Get the total number of entries read
     /// @return The total number of entries read
     auto total_entries_read() const -> std::size_t
