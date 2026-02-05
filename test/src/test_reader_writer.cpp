@@ -158,7 +158,9 @@ TEST(test_reader_writer, buffer_restarted_when_id_changes)
     std::span<uint8_t> buffer_span(buffer);
 
     ouroboros::writer writer;
-    writer.configure(buffer_span, chunk_target_size, chunk_count, initial_id);
+    auto config_result = writer.configure(buffer_span, chunk_target_size,
+                                          chunk_count, initial_id);
+    ASSERT_TRUE(config_result.has_value());
     writer.write("first");
 
     ouroboros::reader reader;
@@ -169,20 +171,34 @@ TEST(test_reader_writer, buffer_restarted_when_id_changes)
     ASSERT_TRUE(entry.has_value());
     EXPECT_EQ(entry->data, "first");
 
-    // Configure writer with new ID
-    writer.configure(buffer_span, chunk_target_size, chunk_count, new_id);
+    // Configure writer with new ID using force_takeover to reinitialize buffer
+    // This simulates a new writer taking over with a different ID
+    // Note: force_takeover reinitializes the buffer, so "first" will be lost
+    auto force_result = writer.configure(buffer_span, chunk_target_size,
+                                         chunk_count, new_id, true);
+    ASSERT_TRUE(force_result.has_value()) << force_result.error().message();
     writer.write("second");
 
-    // Next read should return buffer_restarted
+    // Next read should return buffer_restarted because the buffer ID changed
     auto restart_result = reader.read_next_entry();
     ASSERT_FALSE(restart_result.has_value());
     EXPECT_EQ(restart_result.error(),
               ouroboros::make_error_code(ouroboros::error::buffer_restarted));
-    reader.configure(std::span<const uint8_t>(buffer_span));
-    auto entry2 = reader.read_next_entry();
-    ASSERT_TRUE(entry2.has_value());
-    EXPECT_EQ(entry2->data, "second");
+
+    // Reconfigure reader - it should start from the beginning
+    auto reconfig_result =
+        reader.configure(std::span<const uint8_t>(buffer_span));
+    ASSERT_TRUE(reconfig_result.has_value());
     EXPECT_EQ(reader.buffer_id(), new_id);
+
+    // Read entries - only "second" exists since force_takeover reinitialized
+    auto entry1 = reader.read_next_entry();
+    ASSERT_TRUE(entry1.has_value());
+    EXPECT_EQ(entry1->data, "second");
+
+    // No more entries
+    auto no_more = reader.read_next_entry();
+    EXPECT_FALSE(no_more.has_value());
 }
 
 TEST(test_reader_writer, writer_write_single_entry)
@@ -1134,6 +1150,416 @@ TEST(test_reader_writer, chunk_invalidation_and_wrap_sequence)
     {
         auto no_more = reader2.read_next_entry();
         EXPECT_FALSE(no_more.has_value());
+    }
+}
+
+// ============================================================================
+// Writer Takeover Tests
+// ============================================================================
+
+TEST(test_reader_writer, writer_takeover_succeeds_with_matching_params)
+{
+    constexpr std::size_t chunk_target_size = 1024;
+    constexpr std::size_t chunk_count = 4;
+    constexpr uint64_t buffer_id = 42;
+    auto buffer_size = ouroboros::detail::buffer_format::compute_buffer_size(
+        chunk_target_size, chunk_count);
+    auto buffer = create_aligned_buffer(buffer_size);
+    std::span<uint8_t> buffer_span(buffer);
+
+    // First writer writes some entries
+    {
+        ouroboros::writer writer1;
+        auto result = writer1.configure(buffer_span, chunk_target_size,
+                                        chunk_count, buffer_id);
+        ASSERT_TRUE(result.has_value()) << result.error().message();
+
+        writer1.write("Entry 1");
+        writer1.write("Entry 2");
+        writer1.write("Entry 3");
+        EXPECT_EQ(writer1.total_entries_written(), 3U);
+    }
+
+    // Second writer takes over with same parameters
+    {
+        ouroboros::writer writer2;
+        auto result = writer2.configure(buffer_span, chunk_target_size,
+                                        chunk_count, buffer_id);
+        ASSERT_TRUE(result.has_value()) << result.error().message();
+
+        // Should continue from where writer1 left off
+        EXPECT_EQ(writer2.total_entries_written(), 3U);
+
+        // Write more entries
+        writer2.write("Entry 4");
+        writer2.write("Entry 5");
+        EXPECT_EQ(writer2.total_entries_written(), 5U);
+    }
+
+    // Reader should be able to read all entries
+    ouroboros::reader reader;
+    auto result = reader.configure(std::span<const uint8_t>(buffer_span));
+    ASSERT_TRUE(result.has_value()) << result.error().message();
+
+    std::vector<std::string> expected = {"Entry 1", "Entry 2", "Entry 3",
+                                         "Entry 4", "Entry 5"};
+    for (const auto& expected_entry : expected)
+    {
+        auto entry = reader.read_next_entry();
+        ASSERT_TRUE(entry.has_value()) << entry.error().message();
+        EXPECT_EQ(entry->data, expected_entry);
+    }
+
+    auto no_more = reader.read_next_entry();
+    EXPECT_FALSE(no_more.has_value());
+}
+
+TEST(test_reader_writer, writer_reinitializes_on_version_mismatch)
+{
+    constexpr std::size_t chunk_target_size = 1024;
+    constexpr std::size_t chunk_count = 4;
+    auto buffer_size = ouroboros::detail::buffer_format::compute_buffer_size(
+        chunk_target_size, chunk_count);
+    auto buffer = create_aligned_buffer(buffer_size);
+    std::span<uint8_t> buffer_span(buffer);
+
+    // First writer initializes the buffer
+    ouroboros::writer writer1;
+    auto result1 =
+        writer1.configure(buffer_span, chunk_target_size, chunk_count);
+    ASSERT_TRUE(result1.has_value());
+    writer1.write("Entry 1");
+
+    // Corrupt the version in the buffer
+    uint32_t bad_version = 0xDEADBEEF;
+    std::memcpy(buffer.data() + 8, &bad_version, sizeof(bad_version));
+
+    // Second writer should reinitialize (corrupted version = not initialized)
+    ouroboros::writer writer2;
+    auto result2 =
+        writer2.configure(buffer_span, chunk_target_size, chunk_count);
+    ASSERT_TRUE(result2.has_value());
+
+    // Should start fresh since buffer was reinitialized
+    EXPECT_EQ(writer2.total_entries_written(), 0U);
+
+    writer2.write("Entry 2");
+    EXPECT_EQ(writer2.total_entries_written(), 1U);
+
+    // Reader should only see the new entry
+    ouroboros::reader reader;
+    auto result = reader.configure(std::span<const uint8_t>(buffer_span));
+    ASSERT_TRUE(result.has_value());
+
+    auto entry = reader.read_next_entry();
+    ASSERT_TRUE(entry.has_value());
+    EXPECT_EQ(entry->data, "Entry 2");
+}
+
+TEST(test_reader_writer, writer_takeover_fails_with_chunk_count_mismatch)
+{
+    constexpr std::size_t chunk_target_size = 1024;
+    constexpr std::size_t chunk_count_initial = 4;
+    constexpr std::size_t chunk_count_different = 3; // Different but smaller
+    // Use the larger buffer size to accommodate both configurations
+    auto buffer_size = ouroboros::detail::buffer_format::compute_buffer_size(
+        chunk_target_size, chunk_count_initial);
+    auto buffer = create_aligned_buffer(buffer_size);
+    std::span<uint8_t> buffer_span(buffer);
+
+    // First writer initializes with chunk_count = 4
+    ouroboros::writer writer1;
+    auto result1 =
+        writer1.configure(buffer_span, chunk_target_size, chunk_count_initial);
+    ASSERT_TRUE(result1.has_value());
+    writer1.write("Entry 1");
+
+    // Second writer tries to take over with different (smaller) chunk_count
+    // The buffer is large enough, but the header says chunk_count = 4
+    ouroboros::writer writer2;
+    // Use a subspan that matches the smaller configuration size
+    auto smaller_buffer_size =
+        ouroboros::detail::buffer_format::compute_buffer_size(
+            chunk_target_size, chunk_count_different);
+    auto result2 =
+        writer2.configure(buffer_span.subspan(0, smaller_buffer_size),
+                          chunk_target_size, chunk_count_different);
+    ASSERT_FALSE(result2.has_value());
+    EXPECT_EQ(result2.error(),
+              ouroboros::make_error_code(
+                  ouroboros::error::takeover_chunk_count_mismatch));
+}
+
+// Note: writer_takeover_fails_with_buffer_size_mismatch test removed
+// The buffer size mismatch error is unreachable because the initial VERIFY
+// in configure() checks buffer.size() >= expected_buffer_size before the
+// takeover logic runs. The takeover_buffer_size_mismatch error code exists
+// for completeness but can't be triggered in practice.
+
+TEST(test_reader_writer, writer_takeover_fails_with_buffer_id_mismatch)
+{
+    constexpr std::size_t chunk_target_size = 1024;
+    constexpr std::size_t chunk_count = 4;
+    constexpr uint64_t buffer_id_1 = 100;
+    constexpr uint64_t buffer_id_2 = 200;
+    auto buffer_size = ouroboros::detail::buffer_format::compute_buffer_size(
+        chunk_target_size, chunk_count);
+    auto buffer = create_aligned_buffer(buffer_size);
+    std::span<uint8_t> buffer_span(buffer);
+
+    // First writer initializes with buffer_id_1
+    ouroboros::writer writer1;
+    auto result1 = writer1.configure(buffer_span, chunk_target_size,
+                                     chunk_count, buffer_id_1);
+    ASSERT_TRUE(result1.has_value());
+    writer1.write("Entry 1");
+
+    // Second writer tries to take over with different buffer_id
+    ouroboros::writer writer2;
+    auto result2 = writer2.configure(buffer_span, chunk_target_size,
+                                     chunk_count, buffer_id_2);
+    ASSERT_FALSE(result2.has_value());
+    EXPECT_EQ(result2.error(),
+              ouroboros::make_error_code(
+                  ouroboros::error::takeover_buffer_id_mismatch));
+}
+
+TEST(test_reader_writer, writer_force_takeover_reinitializes_with_different_id)
+{
+    constexpr std::size_t chunk_target_size = 1024;
+    constexpr std::size_t chunk_count = 4;
+    constexpr uint64_t buffer_id_1 = 100;
+    constexpr uint64_t buffer_id_2 = 200;
+    auto buffer_size = ouroboros::detail::buffer_format::compute_buffer_size(
+        chunk_target_size, chunk_count);
+    auto buffer = create_aligned_buffer(buffer_size);
+    std::span<uint8_t> buffer_span(buffer);
+
+    // First writer initializes with buffer_id_1
+    {
+        ouroboros::writer writer1;
+        auto result1 = writer1.configure(buffer_span, chunk_target_size,
+                                         chunk_count, buffer_id_1);
+        ASSERT_TRUE(result1.has_value());
+        writer1.write("Entry 1");
+        writer1.write("Entry 2");
+        EXPECT_EQ(writer1.buffer_id(), buffer_id_1);
+    }
+
+    // Second writer force takeover with different buffer_id
+    // This reinitializes the buffer, losing old entries
+    {
+        ouroboros::writer writer2;
+        auto result2 = writer2.configure(buffer_span, chunk_target_size,
+                                         chunk_count, buffer_id_2,
+                                         true); // force_takeover = true
+        ASSERT_TRUE(result2.has_value()) << result2.error().message();
+
+        // Buffer ID should be updated
+        EXPECT_EQ(writer2.buffer_id(), buffer_id_2);
+
+        // Should start fresh (force_takeover reinitializes)
+        EXPECT_EQ(writer2.total_entries_written(), 0U);
+
+        writer2.write("Entry 3");
+        EXPECT_EQ(writer2.total_entries_written(), 1U);
+    }
+
+    // Reader should see the new buffer_id and only the new entry
+    ouroboros::reader reader;
+    auto result = reader.configure(std::span<const uint8_t>(buffer_span));
+    ASSERT_TRUE(result.has_value());
+    EXPECT_EQ(reader.buffer_id(), buffer_id_2);
+
+    auto entry = reader.read_next_entry();
+    ASSERT_TRUE(entry.has_value());
+    EXPECT_EQ(entry->data, "Entry 3");
+
+    // No more entries
+    auto no_more = reader.read_next_entry();
+    EXPECT_FALSE(no_more.has_value());
+}
+
+TEST(test_reader_writer, writer_takeover_after_wrap)
+{
+    constexpr std::size_t chunk_target_size = 64; // Small chunks to force wraps
+    constexpr std::size_t chunk_count = 2;
+    constexpr uint64_t buffer_id = 42;
+    auto buffer_size = ouroboros::detail::buffer_format::compute_buffer_size(
+        chunk_target_size, chunk_count);
+    auto buffer = create_aligned_buffer(buffer_size);
+    std::span<uint8_t> buffer_span(buffer);
+
+    // First writer writes entries causing wraps
+    std::size_t entries_written_by_first = 0;
+    {
+        ouroboros::writer writer1;
+        auto result = writer1.configure(buffer_span, chunk_target_size,
+                                        chunk_count, buffer_id);
+        ASSERT_TRUE(result.has_value());
+
+        // Write enough entries to cause at least one wrap
+        for (int i = 0; i < 15; ++i)
+        {
+            std::string entry = "Entry " + std::to_string(i);
+            writer1.write(entry);
+        }
+        entries_written_by_first = writer1.total_entries_written();
+    }
+
+    // Second writer takes over
+    {
+        ouroboros::writer writer2;
+        auto result = writer2.configure(buffer_span, chunk_target_size,
+                                        chunk_count, buffer_id);
+        ASSERT_TRUE(result.has_value()) << result.error().message();
+
+        // Should have the same total entries written
+        EXPECT_EQ(writer2.total_entries_written(), entries_written_by_first);
+
+        // Write more entries
+        writer2.write("New Entry A");
+        writer2.write("New Entry B");
+    }
+
+    // Reader should be able to read entries (at least the latest ones)
+    ouroboros::reader reader;
+    auto result = reader.configure(std::span<const uint8_t>(buffer_span));
+    ASSERT_TRUE(result.has_value());
+
+    int read_count = 0;
+    bool found_new_entries = false;
+    while (read_count < 100)
+    {
+        auto entry = reader.read_next_entry();
+        if (!entry.has_value())
+        {
+            break;
+        }
+        read_count++;
+        if (entry->data == "New Entry A" || entry->data == "New Entry B")
+        {
+            found_new_entries = true;
+        }
+    }
+
+    EXPECT_GT(read_count, 0);
+    EXPECT_TRUE(found_new_entries)
+        << "Should be able to read entries written by the second writer";
+}
+
+TEST(test_reader_writer, writer_takeover_fails_after_finish)
+{
+    constexpr std::size_t chunk_target_size = 1024;
+    constexpr std::size_t chunk_count = 4;
+    constexpr uint64_t buffer_id = 42;
+    auto buffer_size = ouroboros::detail::buffer_format::compute_buffer_size(
+        chunk_target_size, chunk_count);
+    auto buffer = create_aligned_buffer(buffer_size);
+    std::span<uint8_t> buffer_span(buffer);
+
+    // First writer writes entries and finishes
+    {
+        ouroboros::writer writer1;
+        auto result = writer1.configure(buffer_span, chunk_target_size,
+                                        chunk_count, buffer_id);
+        ASSERT_TRUE(result.has_value());
+        writer1.write("Entry 1");
+        writer1.write("Entry 2");
+        writer1.finish();
+    }
+
+    // Second writer tries peaceful takeover - should fail because writer
+    // finished
+    {
+        ouroboros::writer writer2;
+        auto result = writer2.configure(buffer_span, chunk_target_size,
+                                        chunk_count, buffer_id);
+        ASSERT_FALSE(result.has_value());
+        EXPECT_EQ(result.error(),
+                  ouroboros::make_error_code(
+                      ouroboros::error::takeover_writer_finished));
+    }
+
+    // With force_takeover, the buffer is reinitialized
+    {
+        ouroboros::writer writer3;
+        auto result = writer3.configure(buffer_span, chunk_target_size,
+                                        chunk_count, buffer_id, true);
+        ASSERT_TRUE(result.has_value()) << result.error().message();
+
+        // Should start fresh
+        EXPECT_EQ(writer3.total_entries_written(), 0U);
+
+        writer3.write("Entry 3");
+        EXPECT_EQ(writer3.total_entries_written(), 1U);
+    }
+
+    // Fresh reader should only see the new entry
+    ouroboros::reader reader;
+    auto result = reader.configure(std::span<const uint8_t>(buffer_span));
+    ASSERT_TRUE(result.has_value());
+
+    auto entry = reader.read_next_entry();
+    ASSERT_TRUE(entry.has_value());
+    EXPECT_EQ(entry->data, "Entry 3");
+
+    auto no_more = reader.read_next_entry();
+    EXPECT_FALSE(no_more.has_value());
+}
+
+TEST(test_reader_writer, writer_takeover_fresh_buffer)
+{
+    // Test that configure on a fresh (uninitialized) buffer still works
+    constexpr std::size_t chunk_target_size = 1024;
+    constexpr std::size_t chunk_count = 4;
+    auto buffer_size = ouroboros::detail::buffer_format::compute_buffer_size(
+        chunk_target_size, chunk_count);
+    auto buffer = create_aligned_buffer(buffer_size);
+    std::span<uint8_t> buffer_span(buffer);
+
+    // Buffer is zeroed, not initialized
+    std::memset(buffer.data(), 0, buffer.size());
+
+    ouroboros::writer writer;
+    auto result =
+        writer.configure(buffer_span, chunk_target_size, chunk_count, 123);
+    ASSERT_TRUE(result.has_value()) << result.error().message();
+
+    EXPECT_EQ(writer.total_entries_written(), 0U);
+    EXPECT_EQ(writer.buffer_id(), 123U);
+
+    writer.write("Test Entry");
+    EXPECT_EQ(writer.total_entries_written(), 1U);
+
+    ouroboros::reader reader;
+    auto reader_result =
+        reader.configure(std::span<const uint8_t>(buffer_span));
+    ASSERT_TRUE(reader_result.has_value());
+
+    auto entry = reader.read_next_entry();
+    ASSERT_TRUE(entry.has_value());
+    EXPECT_EQ(entry->data, "Test Entry");
+}
+
+TEST(test_reader_writer, writer_configure_returns_expected)
+{
+    // Verify that configure returns tl::expected and can be checked
+    constexpr std::size_t chunk_target_size = 1024;
+    constexpr std::size_t chunk_count = 4;
+    auto buffer_size = ouroboros::detail::buffer_format::compute_buffer_size(
+        chunk_target_size, chunk_count);
+    auto buffer = create_aligned_buffer(buffer_size);
+    std::span<uint8_t> buffer_span(buffer);
+
+    ouroboros::writer writer;
+    auto result = writer.configure(buffer_span, chunk_target_size, chunk_count);
+
+    // Should succeed and be checkable
+    EXPECT_TRUE(result.has_value());
+    if (result.has_value())
+    {
+        writer.write("Test");
     }
 }
 

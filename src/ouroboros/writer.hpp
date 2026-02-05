@@ -15,6 +15,7 @@
 #include "detail/atomic.hpp"
 #include "detail/buffer_format.hpp"
 #include "detail/span.hpp"
+#include "error_code.hpp"
 #include "version.hpp"
 
 namespace ouroboros
@@ -128,7 +129,20 @@ public:
     /// Default constructor
     writer() = default;
 
+    /// Information about where to resume writing after a takeover
+    struct resume_info
+    {
+        std::size_t offset;      ///< Byte offset where to continue writing
+        std::size_t chunk_index; ///< Index of the current chunk
+        uint64_t total_entries_written; ///< Number of entries written so far
+    };
+
     /// Configure writer
+    ///
+    /// If the buffer is already initialized with matching parameters (magic,
+    /// version, chunk_count, buffer_size, and buffer_id), the writer will
+    /// attempt to take over from the previous writer and continue appending
+    /// entries where it left off.
     ///
     /// @param buffer View of the buffer to write to (must be at least
     ///               buffer_header_size + (chunk_count * chunk_row_size) +
@@ -137,8 +151,14 @@ public:
     /// @param chunk_count Number of chunks (must be > 0)
     /// @param buffer_id 64-bit ID stored in the buffer header (e.g. for
     ///                  identifying the log instance)
-    void configure(std::span<uint8_t> buffer, std::size_t chunk_target_size,
-                   std::size_t chunk_count, uint64_t buffer_id = 0)
+    /// @param force_takeover If true, allows forceful takeover.
+    ///          It will overwrite the values in the buffer header to the new
+    ///          values and reset the current chunk index to 0.
+    /// @return void on success, or an error_code indicating what failed.
+    auto configure(std::span<uint8_t> buffer, std::size_t chunk_target_size,
+                   std::size_t chunk_count, uint64_t buffer_id = 0,
+                   bool force_takeover = false)
+        -> tl::expected<void, std::error_code>
     {
         VERIFY(buffer.data() != nullptr, "Buffer span must not be null!");
         VERIFY(buffer.size() > 0, "Buffer span must not be empty!");
@@ -146,13 +166,45 @@ public:
         const auto chunk_table_size =
             (chunk_count * detail::buffer_format::chunk_row_size);
         const auto chunks_size = chunk_count * chunk_target_size;
-        VERIFY(buffer.size() >= (detail::buffer_format::buffer_header_size +
-                                 chunk_table_size + chunks_size),
+        const auto expected_buffer_size =
+            detail::buffer_format::buffer_header_size + chunk_table_size +
+            chunks_size;
+        VERIFY(buffer.size() >= expected_buffer_size,
                "Buffer span is too small for the given chunk_target_size and "
                "chunk_count");
         VERIFY(reinterpret_cast<uintptr_t>(buffer.data()) % 8 == 0,
                "Buffer must be 8-byte aligned!");
 
+        // Check if buffer is previously initialized
+        if (is_initialized(buffer))
+        {
+            // Buffer is previously initialized
+
+            // Check if we can do a "peaceful" takeover and just carry on
+            // writing where the previous writer left off.
+            auto result = peaceful_takeover_possible(buffer, chunk_target_size,
+                                                     chunk_count, buffer_id);
+            if (result.has_value())
+            {
+                const auto& info = result.value();
+                m_current_chunk_index = info.chunk_index;
+                m_offset = info.offset;
+                m_total_entries_written = info.total_entries_written;
+                m_finished = false;
+                m_chunk_target_size = chunk_target_size;
+                m_chunk_count = chunk_count;
+                m_buffer_id = buffer_id;
+                m_buffer = buffer;
+                return {};
+            }
+
+            if (!force_takeover)
+            {
+                return tl::make_unexpected(result.error());
+            }
+        }
+
+        // Buffer is not initialized, perform fresh initialization
         m_chunk_target_size = chunk_target_size;
         m_chunk_count = chunk_count;
         m_buffer_id = buffer_id;
@@ -175,9 +227,11 @@ public:
         m_offset = detail::buffer_format::buffer_header_size + chunk_table_size;
         m_offset = detail::buffer_format::align_up(
             m_offset, detail::buffer_format::entry_alignment);
-        initialize_chunk(chunk_row(m_current_chunk_index), m_offset,
+        initialize_chunk(chunk_row(m_buffer, m_current_chunk_index), m_offset,
                          m_total_entries_written);
-        commit_chunk(m_current_chunk_index);
+        commit_chunk(m_buffer, m_current_chunk_index);
+
+        return {};
     }
 
     /// Write an entry to the log.
@@ -229,12 +283,12 @@ public:
             VERIFY(m_offset % detail::buffer_format::entry_alignment == 0,
                    "Offset is not aligned to entry alignment", m_offset,
                    detail::buffer_format::entry_alignment);
-            initialize_chunk(chunk_row(m_current_chunk_index), m_offset,
-                             m_total_entries_written);
+            initialize_chunk(chunk_row(m_buffer, m_current_chunk_index),
+                             m_offset, m_total_entries_written);
         }
 
         // Get current chunk offset
-        auto chunk_offset = get_chunk_offset(m_current_chunk_index);
+        auto chunk_offset = get_chunk_offset(m_buffer, m_current_chunk_index);
         VERIFY(chunk_offset <= m_offset, "Chunk offset is greater than offset",
                chunk_offset, m_offset);
         auto written_in_chunk = m_offset - chunk_offset;
@@ -244,19 +298,19 @@ public:
             // the next chunk
 
             // But first check if the chunk we are leaving is committed
-            if (!is_chunk_committed(m_current_chunk_index))
+            if (!is_chunk_committed(m_buffer, m_current_chunk_index))
             {
                 // Commit the chunk since we now have entries in the chunk
-                commit_chunk(m_current_chunk_index);
+                commit_chunk(m_buffer, m_current_chunk_index);
             }
 
             m_current_chunk_index++;
             VERIFY(m_current_chunk_index < m_chunk_count,
                    "Current chunk index exceeds chunk count",
                    m_current_chunk_index, m_chunk_count);
-            initialize_chunk(chunk_row(m_current_chunk_index), m_offset,
-                             m_total_entries_written);
-            chunk_offset = get_chunk_offset(m_current_chunk_index);
+            initialize_chunk(chunk_row(m_buffer, m_current_chunk_index),
+                             m_offset, m_total_entries_written);
+            chunk_offset = get_chunk_offset(m_buffer, m_current_chunk_index);
             m_offset = chunk_offset;
         }
 
@@ -272,12 +326,12 @@ public:
         for (auto i = 1; i <= overlapping_chunks; i++)
         {
             auto chunk_index = m_current_chunk_index + i;
-            if (!is_chunk_committed(chunk_index))
+            if (!is_chunk_committed(m_buffer, chunk_index))
             {
                 // Chunk is already uncommitted, nothing to do
                 continue;
             }
-            auto info = chunk_row(chunk_index);
+            auto info = chunk_row(m_buffer, chunk_index);
             detail::atomic::store_release(
                 detail::buffer_format::chunk_token(info),
                 static_cast<uint64_t>(0));
@@ -321,10 +375,10 @@ public:
             header, detail::buffer_format::set_commit(total_entry_size));
 
         // check if the current chunk is committed
-        if (!is_chunk_committed(m_current_chunk_index))
+        if (!is_chunk_committed(m_buffer, m_current_chunk_index))
         {
             // Commit the chunk since we now have entries in the chunk
-            commit_chunk(m_current_chunk_index);
+            commit_chunk(m_buffer, m_current_chunk_index);
         }
     }
 
@@ -365,8 +419,8 @@ public:
             VERIFY(m_offset % detail::buffer_format::entry_alignment == 0,
                    "Offset is not aligned to entry alignment", m_offset,
                    detail::buffer_format::entry_alignment);
-            initialize_chunk(chunk_row(m_current_chunk_index), m_offset,
-                             m_total_entries_written);
+            initialize_chunk(chunk_row(m_buffer, m_current_chunk_index),
+                             m_offset, m_total_entries_written);
         }
 
         auto header = detail::buffer_format::entry_header(m_buffer.subspan(
@@ -378,9 +432,9 @@ public:
 
         m_offset += detail::buffer_format::entry_header_size;
 
-        if (!is_chunk_committed(m_current_chunk_index))
+        if (!is_chunk_committed(m_buffer, m_current_chunk_index))
         {
-            commit_chunk(m_current_chunk_index);
+            commit_chunk(m_buffer, m_current_chunk_index);
         }
 
         m_finished = true;
@@ -427,6 +481,183 @@ public:
     }
 
 private:
+    /// Check if a buffer has been initialized (has valid magic bytes and is
+    /// the correct version)
+    /// @param buffer The buffer to check
+    /// @return True if the buffer is initialized
+    static auto is_initialized(std::span<const uint8_t> buffer) -> bool
+    {
+        if (buffer.size() < detail::buffer_format::buffer_header_size)
+        {
+            return false;
+        }
+
+        const uint64_t magic_value = detail::atomic::load_acquire(
+            reinterpret_cast<const uint64_t*>(buffer.data()));
+
+        if (magic_value != detail::buffer_format::magic)
+        {
+            return false;
+        }
+
+        const uint32_t version = read_value<uint32_t>(buffer.data() + 8);
+        if (version != detail::buffer_format::version)
+        {
+            return false;
+        }
+
+        return true;
+    }
+
+    /// Read a value from a buffer using memcpy (alignment-safe)
+    template <typename T>
+    static auto read_value(const uint8_t* buffer) -> T
+    {
+        T value;
+        std::memcpy(&value, buffer, sizeof(value));
+        return value;
+    }
+
+    /// Check if a peaceful takeover is possible
+    /// @param buffer The buffer to check
+    /// @param chunk_target_size The target size of each chunk
+    /// @param chunk_count The number of chunks
+    /// @param buffer_id The buffer ID
+    /// @return resume_info on success, or an error_code indicating what failed:
+    ///         - takeover_chunk_count_mismatch: Chunk count doesn't match
+    ///         - takeover_buffer_size_mismatch: Buffer size doesn't match
+    ///         - takeover_buffer_id_mismatch: Buffer ID doesn't match
+    static auto peaceful_takeover_possible(std::span<const uint8_t> buffer,
+                                           std::size_t chunk_target_size,
+                                           std::size_t chunk_count,
+                                           uint64_t buffer_id)
+        -> tl::expected<resume_info, std::error_code>
+    {
+        VERIFY(is_initialized(buffer), "Buffer is not initialized");
+
+        // Read and verify chunk count
+        const uint32_t existing_chunk_count =
+            read_value<uint32_t>(buffer.data() + 12);
+        if (existing_chunk_count != chunk_count)
+        {
+            return tl::make_unexpected(make_error_code(
+                ouroboros::error::takeover_chunk_count_mismatch));
+        }
+
+        // Verify buffer size matches expected size
+        const auto chunk_table_size =
+            (chunk_count * detail::buffer_format::chunk_row_size);
+        const auto chunks_size = chunk_count * chunk_target_size;
+        const auto expected_buffer_size =
+            detail::buffer_format::buffer_header_size + chunk_table_size +
+            chunks_size;
+        if (buffer.size() < expected_buffer_size)
+        {
+            return tl::make_unexpected(make_error_code(
+                ouroboros::error::takeover_buffer_size_mismatch));
+        }
+
+        // Read and verify buffer ID (unless force_takeover is set)
+        const uint64_t existing_buffer_id =
+            detail::atomic::load_acquire(reinterpret_cast<const uint64_t*>(
+                buffer.data() + detail::buffer_format::buffer_id_offset));
+        if (existing_buffer_id != buffer_id)
+        {
+            return tl::make_unexpected(
+                make_error_code(ouroboros::error::takeover_buffer_id_mismatch));
+        }
+
+        // Resume position
+        return resume_position(buffer, chunk_count);
+    }
+
+    /// Find the position where the previous writer left off and set up state
+    /// to continue from there
+    /// @param buffer The buffer to check
+    /// @param chunk_count The number of chunks
+    /// @return resume_info on success, or an error_code indicating what failed.
+    static auto resume_position(std::span<const uint8_t> buffer,
+                                std::size_t chunk_count)
+        -> tl::expected<resume_info, std::error_code>
+    {
+        // Find the chunk with the highest token
+        std::size_t highest_token = 0;
+        std::size_t highest_token_chunk_index = 0;
+        for (std::size_t i = 0; i < chunk_count; i++)
+        {
+            if (!is_chunk_committed(buffer, i))
+            {
+                continue;
+            }
+            auto token = detail::atomic::load_acquire(
+                detail::buffer_format::chunk_token(chunk_row(buffer, i)));
+            if (token > highest_token)
+            {
+                highest_token = token;
+                highest_token_chunk_index = i;
+            }
+        }
+        VERIFY(is_chunk_committed(buffer, highest_token_chunk_index),
+               "Highest token chunk is not committed",
+               highest_token_chunk_index);
+
+        auto offset = get_chunk_offset(buffer, highest_token_chunk_index);
+        while (true)
+        {
+            if (offset >=
+                buffer.size() - detail::buffer_format::entry_header_size)
+            {
+                // Buffer overflow
+                return tl::make_unexpected(make_error_code(
+                    ouroboros::error::takeover_buffer_overflow));
+            }
+
+            auto length_with_flag = detail::atomic::load_acquire(
+                detail::buffer_format::entry_header(buffer.subspan(
+                    offset, detail::buffer_format::entry_header_size)));
+            if (detail::buffer_format::is_committed(length_with_flag))
+            {
+                auto length =
+                    detail::buffer_format::clear_commit(length_with_flag);
+                if (length == 0)
+                {
+                    // Entry is not written yet, we have found the resume
+                    // position
+                    break;
+                }
+                else if (length == 1)
+                {
+                    // Entry is a wrap - this is unexpected.
+                    // The previous writer should have updated the chunk table
+                    // such that the first chunk would have the highest token.
+                    return tl::make_unexpected(make_error_code(
+                        ouroboros::error::takeover_unexpected_wrap));
+                }
+                else if (length == 3)
+                {
+                    return tl::make_unexpected(make_error_code(
+                        ouroboros::error::takeover_writer_finished));
+                }
+                else
+                {
+                    // Entry is committed, we need to find the next entry that
+                    // is not committed
+                    offset += length;
+                    offset = detail::buffer_format::align_up(
+                        offset, detail::buffer_format::entry_alignment);
+                    // Increment the highest token since we have read an entry
+                    highest_token += 1;
+                }
+            }
+            else
+            {
+                // Entry is not committed, we have found the resume position
+                break;
+            }
+        }
+        return resume_info{offset, highest_token_chunk_index, highest_token};
+    }
+
     static void initialize_chunk(std::span<uint8_t> info, uint64_t offset,
                                  uint64_t token)
     {
@@ -445,18 +676,21 @@ private:
                                       offset);
     }
 
-    auto is_chunk_committed(std::size_t chunk_index) const -> bool
+    static auto is_chunk_committed(std::span<const uint8_t> buffer,
+                                   std::size_t chunk_index) -> bool
     {
         // Note we do not need to load aquire here since the writer is the only
         // one modifying the commit flag
         return detail::buffer_format::is_committed(
-            *detail::buffer_format::chunk_offset(chunk_row(chunk_index)));
+            *detail::buffer_format::chunk_offset(
+                chunk_row(buffer, chunk_index)));
     }
 
-    void commit_chunk(std::size_t chunk_index)
+    inline static void commit_chunk(std::span<uint8_t> buffer,
+                                    std::size_t chunk_index)
     {
         auto offset =
-            detail::buffer_format::chunk_offset(chunk_row(chunk_index));
+            detail::buffer_format::chunk_offset(chunk_row(buffer, chunk_index));
         VERIFY(!detail::buffer_format::is_committed(*offset),
                "Chunk already committed");
 
@@ -464,20 +698,33 @@ private:
             offset, detail::buffer_format::set_commit(*offset));
     }
 
-    auto get_chunk_offset(std::size_t chunk_index) const -> std::size_t
+    inline static auto get_chunk_offset(std::span<const uint8_t> buffer,
+                                        std::size_t chunk_index) -> std::size_t
     {
         // Clear the commit flag regardless if it's there
-        if (is_chunk_committed(chunk_index))
+        if (is_chunk_committed(buffer, chunk_index))
         {
             return detail::buffer_format::clear_commit(
-                *detail::buffer_format::chunk_offset(chunk_row(chunk_index)));
+                *detail::buffer_format::chunk_offset(
+                    chunk_row(buffer, chunk_index)));
         }
-        return *detail::buffer_format::chunk_offset(chunk_row(chunk_index));
+        return *detail::buffer_format::chunk_offset(
+            chunk_row(buffer, chunk_index));
     }
 
-    auto chunk_row(std::size_t chunk_index) const -> std::span<uint8_t>
+    inline static auto chunk_row(std::span<const uint8_t> buffer,
+                                 std::size_t chunk_index)
+        -> std::span<const uint8_t>
     {
-        return m_buffer.subspan(
+        return buffer.subspan(
+            detail::buffer_format::chunk_row_offset(chunk_index),
+            detail::buffer_format::chunk_row_size);
+    }
+
+    inline static auto chunk_row(std::span<uint8_t> buffer,
+                                 std::size_t chunk_index) -> std::span<uint8_t>
+    {
+        return buffer.subspan(
             detail::buffer_format::chunk_row_offset(chunk_index),
             detail::buffer_format::chunk_row_size);
     }

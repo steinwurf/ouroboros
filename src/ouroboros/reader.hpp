@@ -196,6 +196,10 @@ public:
         m_buffer_id = buffer_id;
         m_total_entries_read = 0;
         m_writer_finished = false;
+        // Reset current chunk state before setting new chunk
+        // This ensures reconfigure works correctly even if the new chunk has
+        // the same token as the previous configuration
+        m_current_chunk = chunk_info{};
         set_current_chunk(start);
 
         return {};

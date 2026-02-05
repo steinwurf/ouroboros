@@ -23,6 +23,20 @@ ERROR_TAG(shared_memory_stat_failed,
           "Failed to get shared memory segment status.")
 ERROR_TAG(shared_memory_not_supported,
           "Shared memory not supported on this platform.")
+ERROR_TAG(takeover_not_initialized,
+          "Cannot takeover: buffer is not initialized (missing magic bytes).")
+ERROR_TAG(takeover_version_mismatch,
+          "Cannot takeover: buffer version does not match.")
+ERROR_TAG(takeover_chunk_count_mismatch,
+          "Cannot takeover: chunk count does not match.")
+ERROR_TAG(takeover_buffer_size_mismatch,
+          "Cannot takeover: buffer size does not match expected size.")
+ERROR_TAG(takeover_buffer_id_mismatch,
+          "Cannot takeover: buffer ID does not match.")
+ERROR_TAG(takeover_writer_finished, "Cannot takeover: writer has finished.")
+ERROR_TAG(takeover_unexpected_wrap,
+          "Cannot takeover: unexpected wrap found in buffer.")
+ERROR_TAG(takeover_buffer_overflow, "Cannot takeover: buffer overflow.")
 #else
 #error "Missing ERROR_TAG"
 #endif
