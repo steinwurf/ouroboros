@@ -157,14 +157,15 @@ public:
                 make_error_code(ouroboros::error::invalid_magic));
         }
 
-        const uint32_t version = read_value<uint32_t>(buffer.data() + 8);
+        const uint32_t version =
+            detail::buffer_format::read_value<uint32_t>(buffer.data() + 8);
         if (version != detail::buffer_format::version)
         {
             return tl::make_unexpected(
                 make_error_code(ouroboros::error::unsupported_version));
         }
         const std::size_t chunk_count =
-            read_value<uint32_t>(buffer.data() + 12);
+            detail::buffer_format::read_value<uint32_t>(buffer.data() + 12);
         const uint64_t buffer_id =
             detail::atomic::load_acquire(reinterpret_cast<const uint64_t*>(
                 buffer.data() + detail::buffer_format::buffer_id_offset));
@@ -401,7 +402,8 @@ public:
             const uint64_t sequence_number =
                 m_current_chunk.token() + m_entries_read_in_current_chunk;
             return entry(payload_view,
-                         chunk_row(m_buffer, m_current_chunk.index()),
+                         detail::buffer_format::chunk_row(
+                             m_buffer, m_current_chunk.index()),
                          m_current_chunk.token(), sequence_number);
         }
     }
@@ -474,31 +476,15 @@ private:
         m_entries_read_in_current_chunk = 0;
     }
 
-    template <typename T>
-    static T read_value(const uint8_t* buffer)
-    {
-        T value;
-        std::memcpy(&value, buffer, sizeof(value));
-        return value;
-    }
-
     static auto get_chunk_info(std::span<const uint8_t> buffer,
                                std::size_t chunk_index) -> chunk_info
     {
-        const auto& row = chunk_row(buffer, chunk_index);
+        const auto row = detail::buffer_format::chunk_row(buffer, chunk_index);
         return chunk_info(chunk_index,
                           detail::atomic::load_acquire(
                               detail::buffer_format::chunk_token(row)),
                           detail::atomic::load_acquire(
                               detail::buffer_format::chunk_offset(row)));
-    }
-
-    static auto chunk_row(std::span<const uint8_t> buffer,
-                          std::size_t chunk_index) -> std::span<const uint8_t>
-    {
-        return buffer.subspan(
-            detail::buffer_format::chunk_row_offset(chunk_index),
-            detail::buffer_format::chunk_row_size);
     }
 
     static auto find_chunk(std::span<const uint8_t> buffer,

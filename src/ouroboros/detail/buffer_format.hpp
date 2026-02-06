@@ -4,9 +4,11 @@
 #pragma once
 
 #include <cstdint>
+#include <cstring>
 #include <verify/verify.hpp>
 
 #include "../version.hpp"
+#include "atomic.hpp"
 #include "span.hpp"
 
 namespace ouroboros
@@ -164,6 +166,105 @@ inline constexpr T set_commit(T v) noexcept
     constexpr T msb_mask = static_cast<T>(1) << (sizeof(T) * 8 - 1);
     return (v | msb_mask);
 }
+
+// ---- Shared helper functions ----
+
+/// Read a value from a buffer using memcpy (alignment-safe)
+/// @tparam T The type of value to read
+/// @param buffer Pointer to the buffer to read from
+/// @return The value read from the buffer
+template <typename T>
+inline auto read_value(const uint8_t* buffer) -> T
+{
+    T value;
+    std::memcpy(&value, buffer, sizeof(value));
+    return value;
+}
+
+/// Write a value to a buffer using memcpy (alignment-safe)
+/// @tparam T The type of value to write
+/// @param buffer The buffer to write to (must be at least sizeof(T) bytes)
+/// @param value The value to write
+template <typename T>
+inline void write_value(std::span<uint8_t> buffer, T value)
+{
+    VERIFY(buffer.size() >= sizeof(T), "Buffer too small for value", sizeof(T),
+           buffer.size());
+    std::memcpy(buffer.data(), &value, sizeof(value));
+}
+
+/// Get a span to a chunk row in the buffer (const version)
+/// @param buffer The buffer containing the chunk table
+/// @param chunk_index The index of the chunk
+/// @return A span to the chunk row
+inline auto chunk_row(std::span<const uint8_t> buffer, std::size_t chunk_index)
+    -> std::span<const uint8_t>
+{
+    return buffer.subspan(chunk_row_offset(chunk_index), chunk_row_size);
+}
+
+/// Get a span to a chunk row in the buffer (mutable version)
+/// @param buffer The buffer containing the chunk table
+/// @param chunk_index The index of the chunk
+/// @return A span to the chunk row
+inline auto chunk_row(std::span<uint8_t> buffer, std::size_t chunk_index)
+    -> std::span<uint8_t>
+{
+    return buffer.subspan(chunk_row_offset(chunk_index), chunk_row_size);
+}
+
+/// Check if a buffer has been initialized with valid magic bytes and version
+/// @param buffer The buffer to check
+/// @return True if the buffer has valid magic and version
+inline auto is_initialized(std::span<const uint8_t> buffer) -> bool
+{
+    if (buffer.size() < buffer_header_size)
+    {
+        return false;
+    }
+
+    const uint64_t magic_value =
+        atomic::load_acquire(reinterpret_cast<const uint64_t*>(buffer.data()));
+
+    if (magic_value != magic)
+    {
+        return false;
+    }
+
+    const uint32_t buf_version = read_value<uint32_t>(buffer.data() + 8);
+    if (buf_version != version)
+    {
+        return false;
+    }
+
+    return true;
+}
+
+/// Check if a chunk is committed
+/// @param buffer The buffer containing the chunk table
+/// @param chunk_index The index of the chunk
+/// @return True if the chunk is committed
+inline auto is_chunk_committed(std::span<const uint8_t> buffer,
+                               std::size_t chunk_index) -> bool
+{
+    return is_committed(*chunk_offset(chunk_row(buffer, chunk_index)));
+}
+
+/// Get the offset of a chunk (with commit flag cleared if present)
+/// @param buffer The buffer containing the chunk table
+/// @param chunk_index The index of the chunk
+/// @return The offset of the chunk
+inline auto get_chunk_offset(std::span<const uint8_t> buffer,
+                             std::size_t chunk_index) -> std::size_t
+{
+    auto offset_value = *chunk_offset(chunk_row(buffer, chunk_index));
+    if (is_committed(offset_value))
+    {
+        return clear_commit(offset_value);
+    }
+    return offset_value;
+}
+
 } // namespace buffer_format
 } // namespace detail
 }

@@ -176,7 +176,7 @@ public:
                "Buffer must be 8-byte aligned!");
 
         // Check if buffer is previously initialized
-        if (is_initialized(buffer))
+        if (detail::buffer_format::is_initialized(buffer))
         {
             // Buffer is previously initialized
 
@@ -227,8 +227,9 @@ public:
         m_offset = detail::buffer_format::buffer_header_size + chunk_table_size;
         m_offset = detail::buffer_format::align_up(
             m_offset, detail::buffer_format::entry_alignment);
-        initialize_chunk(chunk_row(m_buffer, m_current_chunk_index), m_offset,
-                         m_total_entries_written);
+        initialize_chunk(
+            detail::buffer_format::chunk_row(m_buffer, m_current_chunk_index),
+            m_offset, m_total_entries_written);
         commit_chunk(m_buffer, m_current_chunk_index);
 
         return {};
@@ -283,12 +284,14 @@ public:
             VERIFY(m_offset % detail::buffer_format::entry_alignment == 0,
                    "Offset is not aligned to entry alignment", m_offset,
                    detail::buffer_format::entry_alignment);
-            initialize_chunk(chunk_row(m_buffer, m_current_chunk_index),
+            initialize_chunk(detail::buffer_format::chunk_row(
+                                 m_buffer, m_current_chunk_index),
                              m_offset, m_total_entries_written);
         }
 
         // Get current chunk offset
-        auto chunk_offset = get_chunk_offset(m_buffer, m_current_chunk_index);
+        auto chunk_offset = detail::buffer_format::get_chunk_offset(
+            m_buffer, m_current_chunk_index);
         VERIFY(chunk_offset <= m_offset, "Chunk offset is greater than offset",
                chunk_offset, m_offset);
         auto written_in_chunk = m_offset - chunk_offset;
@@ -298,7 +301,8 @@ public:
             // the next chunk
 
             // But first check if the chunk we are leaving is committed
-            if (!is_chunk_committed(m_buffer, m_current_chunk_index))
+            if (!detail::buffer_format::is_chunk_committed(
+                    m_buffer, m_current_chunk_index))
             {
                 // Commit the chunk since we now have entries in the chunk
                 commit_chunk(m_buffer, m_current_chunk_index);
@@ -308,9 +312,11 @@ public:
             VERIFY(m_current_chunk_index < m_chunk_count,
                    "Current chunk index exceeds chunk count",
                    m_current_chunk_index, m_chunk_count);
-            initialize_chunk(chunk_row(m_buffer, m_current_chunk_index),
+            initialize_chunk(detail::buffer_format::chunk_row(
+                                 m_buffer, m_current_chunk_index),
                              m_offset, m_total_entries_written);
-            chunk_offset = get_chunk_offset(m_buffer, m_current_chunk_index);
+            chunk_offset = detail::buffer_format::get_chunk_offset(
+                m_buffer, m_current_chunk_index);
             m_offset = chunk_offset;
         }
 
@@ -326,12 +332,13 @@ public:
         for (auto i = 1; i <= overlapping_chunks; i++)
         {
             auto chunk_index = m_current_chunk_index + i;
-            if (!is_chunk_committed(m_buffer, chunk_index))
+            if (!detail::buffer_format::is_chunk_committed(m_buffer,
+                                                           chunk_index))
             {
                 // Chunk is already uncommitted, nothing to do
                 continue;
             }
-            auto info = chunk_row(m_buffer, chunk_index);
+            auto info = detail::buffer_format::chunk_row(m_buffer, chunk_index);
             detail::atomic::store_release(
                 detail::buffer_format::chunk_token(info),
                 static_cast<uint64_t>(0));
@@ -375,7 +382,8 @@ public:
             header, detail::buffer_format::set_commit(total_entry_size));
 
         // check if the current chunk is committed
-        if (!is_chunk_committed(m_buffer, m_current_chunk_index))
+        if (!detail::buffer_format::is_chunk_committed(m_buffer,
+                                                       m_current_chunk_index))
         {
             // Commit the chunk since we now have entries in the chunk
             commit_chunk(m_buffer, m_current_chunk_index);
@@ -419,7 +427,8 @@ public:
             VERIFY(m_offset % detail::buffer_format::entry_alignment == 0,
                    "Offset is not aligned to entry alignment", m_offset,
                    detail::buffer_format::entry_alignment);
-            initialize_chunk(chunk_row(m_buffer, m_current_chunk_index),
+            initialize_chunk(detail::buffer_format::chunk_row(
+                                 m_buffer, m_current_chunk_index),
                              m_offset, m_total_entries_written);
         }
 
@@ -432,7 +441,8 @@ public:
 
         m_offset += detail::buffer_format::entry_header_size;
 
-        if (!is_chunk_committed(m_buffer, m_current_chunk_index))
+        if (!detail::buffer_format::is_chunk_committed(m_buffer,
+                                                       m_current_chunk_index))
         {
             commit_chunk(m_buffer, m_current_chunk_index);
         }
@@ -481,43 +491,6 @@ public:
     }
 
 private:
-    /// Check if a buffer has been initialized (has valid magic bytes and is
-    /// the correct version)
-    /// @param buffer The buffer to check
-    /// @return True if the buffer is initialized
-    static auto is_initialized(std::span<const uint8_t> buffer) -> bool
-    {
-        if (buffer.size() < detail::buffer_format::buffer_header_size)
-        {
-            return false;
-        }
-
-        const uint64_t magic_value = detail::atomic::load_acquire(
-            reinterpret_cast<const uint64_t*>(buffer.data()));
-
-        if (magic_value != detail::buffer_format::magic)
-        {
-            return false;
-        }
-
-        const uint32_t version = read_value<uint32_t>(buffer.data() + 8);
-        if (version != detail::buffer_format::version)
-        {
-            return false;
-        }
-
-        return true;
-    }
-
-    /// Read a value from a buffer using memcpy (alignment-safe)
-    template <typename T>
-    static auto read_value(const uint8_t* buffer) -> T
-    {
-        T value;
-        std::memcpy(&value, buffer, sizeof(value));
-        return value;
-    }
-
     /// Check if a peaceful takeover is possible
     /// @param buffer The buffer to check
     /// @param chunk_target_size The target size of each chunk
@@ -533,11 +506,12 @@ private:
                                            uint64_t buffer_id)
         -> tl::expected<resume_info, std::error_code>
     {
-        VERIFY(is_initialized(buffer), "Buffer is not initialized");
+        VERIFY(detail::buffer_format::is_initialized(buffer),
+               "Buffer is not initialized");
 
         // Read and verify chunk count
         const uint32_t existing_chunk_count =
-            read_value<uint32_t>(buffer.data() + 12);
+            detail::buffer_format::read_value<uint32_t>(buffer.data() + 12);
         if (existing_chunk_count != chunk_count)
         {
             return tl::make_unexpected(make_error_code(
@@ -585,23 +559,26 @@ private:
         std::size_t highest_token_chunk_index = 0;
         for (std::size_t i = 0; i < chunk_count; i++)
         {
-            if (!is_chunk_committed(buffer, i))
+            if (!detail::buffer_format::is_chunk_committed(buffer, i))
             {
                 continue;
             }
-            auto token = detail::atomic::load_acquire(
-                detail::buffer_format::chunk_token(chunk_row(buffer, i)));
+            auto token =
+                detail::atomic::load_acquire(detail::buffer_format::chunk_token(
+                    detail::buffer_format::chunk_row(buffer, i)));
             if (token > highest_token)
             {
                 highest_token = token;
                 highest_token_chunk_index = i;
             }
         }
-        VERIFY(is_chunk_committed(buffer, highest_token_chunk_index),
+        VERIFY(detail::buffer_format::is_chunk_committed(
+                   buffer, highest_token_chunk_index),
                "Highest token chunk is not committed",
                highest_token_chunk_index);
 
-        auto offset = get_chunk_offset(buffer, highest_token_chunk_index);
+        auto offset = detail::buffer_format::get_chunk_offset(
+            buffer, highest_token_chunk_index);
         while (true)
         {
             if (offset >=
@@ -676,66 +653,16 @@ private:
                                       offset);
     }
 
-    static auto is_chunk_committed(std::span<const uint8_t> buffer,
-                                   std::size_t chunk_index) -> bool
-    {
-        // Note we do not need to load aquire here since the writer is the only
-        // one modifying the commit flag
-        return detail::buffer_format::is_committed(
-            *detail::buffer_format::chunk_offset(
-                chunk_row(buffer, chunk_index)));
-    }
-
     inline static void commit_chunk(std::span<uint8_t> buffer,
                                     std::size_t chunk_index)
     {
-        auto offset =
-            detail::buffer_format::chunk_offset(chunk_row(buffer, chunk_index));
+        auto offset = detail::buffer_format::chunk_offset(
+            detail::buffer_format::chunk_row(buffer, chunk_index));
         VERIFY(!detail::buffer_format::is_committed(*offset),
                "Chunk already committed");
 
         detail::atomic::store_release(
             offset, detail::buffer_format::set_commit(*offset));
-    }
-
-    inline static auto get_chunk_offset(std::span<const uint8_t> buffer,
-                                        std::size_t chunk_index) -> std::size_t
-    {
-        // Clear the commit flag regardless if it's there
-        if (is_chunk_committed(buffer, chunk_index))
-        {
-            return detail::buffer_format::clear_commit(
-                *detail::buffer_format::chunk_offset(
-                    chunk_row(buffer, chunk_index)));
-        }
-        return *detail::buffer_format::chunk_offset(
-            chunk_row(buffer, chunk_index));
-    }
-
-    inline static auto chunk_row(std::span<const uint8_t> buffer,
-                                 std::size_t chunk_index)
-        -> std::span<const uint8_t>
-    {
-        return buffer.subspan(
-            detail::buffer_format::chunk_row_offset(chunk_index),
-            detail::buffer_format::chunk_row_size);
-    }
-
-    inline static auto chunk_row(std::span<uint8_t> buffer,
-                                 std::size_t chunk_index) -> std::span<uint8_t>
-    {
-        return buffer.subspan(
-            detail::buffer_format::chunk_row_offset(chunk_index),
-            detail::buffer_format::chunk_row_size);
-    }
-
-    // Helper functions to write values using memcpy (alignment-safe)
-    template <typename T>
-    static void write_value(std::span<uint8_t> buffer, T value)
-    {
-        VERIFY(buffer.size() >= sizeof(T), "Buffer too small for value",
-               sizeof(T), buffer.size());
-        std::memcpy(buffer.data(), &value, sizeof(value));
     }
 
     void write_header(std::span<uint8_t> buffer, uint32_t chunk_count,
@@ -751,10 +678,11 @@ private:
         // Write header fields first (magic written last to ensure fully
         // initialized buffer)
         // Offset 8: Version (4 bytes)
-        write_value(buffer.subspan(8, 4), detail::buffer_format::version);
+        detail::buffer_format::write_value(buffer.subspan(8, 4),
+                                           detail::buffer_format::version);
 
         // Offset 12: Chunk count (4 bytes)
-        write_value(buffer.subspan(12, 4), chunk_count);
+        detail::buffer_format::write_value(buffer.subspan(12, 4), chunk_count);
 
         // Offset 16: Buffer ID (8 bytes) - written atomically for reader
         // restart detection
