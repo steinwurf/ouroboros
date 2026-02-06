@@ -66,6 +66,12 @@ class BufferRestartedError(ReaderError):
     pass
 
 
+class ReservedEntryLengthError(ReaderError):
+    """Raised when a reserved entry length value is encountered."""
+
+    pass
+
+
 def _is_committed(value: int, bits: int = 64) -> bool:
     """Check if the commit bit (MSB) is set."""
     msb_mask = 1 << (bits - 1)
@@ -474,15 +480,14 @@ class Reader:
             # Clear the commit flag and get the length
             length = _clear_commit(length_with_flag, bits=32)
 
-            # Check if the entry length is valid
+            # Handle special length values and normal entries
             if length == 0:
                 log.debug(
                     "read_next_entry: offset=%d length=0 (not written yet)",
                     self._offset,
                 )
                 return None
-
-            if length == 1:
+            elif length == 1:
                 log.debug(
                     "read_next_entry: offset=%d length=1 (writer wrap), jump chunk 0",
                     self._offset,
@@ -491,8 +496,15 @@ class Reader:
                     log.debug("read_next_entry: jump_to_chunk(0) failed, None")
                     return None
                 continue
-
-            if length == 3:
+            elif length == 2:
+                log.debug(
+                    "read_next_entry: offset=%d length=2 (reserved)",
+                    self._offset,
+                )
+                raise ReservedEntryLengthError(
+                    "Reserved entry length value encountered"
+                )
+            elif length == 3:
                 log.debug(
                     "read_next_entry: offset=%d length=3 (writer finished)",
                     self._offset,
@@ -501,9 +513,7 @@ class Reader:
                 self._offset = _align_up(self._offset, ENTRY_ALIGNMENT)
                 self._writer_finished = True
                 return None
-
-            # Validate length
-            if length < ENTRY_HEADER_SIZE:
+            elif length < ENTRY_HEADER_SIZE:
                 raise ReaderError(
                     f"Entry length {length} smaller than header size {ENTRY_HEADER_SIZE}"
                 )

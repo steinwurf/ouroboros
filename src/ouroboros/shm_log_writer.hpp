@@ -85,10 +85,10 @@ public:
     ///                      destruction (default: true)
     /// @param buffer_id 64-bit ID stored in the buffer header (default: 0)
     /// @return Error if configuration fails
-    auto configure(const std::string& shm_name, std::size_t chunk_target_size,
-                   std::size_t chunk_count, bool should_unlink = true,
-                   uint64_t buffer_id = 0)
-        -> tl::expected<void, std::error_code>
+    auto
+    configure(const std::string& shm_name, std::size_t chunk_target_size,
+              std::size_t chunk_count, bool should_unlink = true,
+              uint64_t buffer_id = 0) -> tl::expected<void, std::error_code>
     {
         VERIFY(chunk_count > 0, "chunk_count must be greater than 0");
         VERIFY(!shm_name.empty(), "shm_name must not be empty");

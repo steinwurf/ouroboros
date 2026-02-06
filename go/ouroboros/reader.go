@@ -49,14 +49,15 @@ const (
 
 // Reader errors
 var (
-	ErrInvalidMagic       = errors.New("buffer magic value does not match")
-	ErrUnsupportedVersion = errors.New("unsupported buffer version")
-	ErrInvalidChunkCount  = errors.New("chunk count is zero")
-	ErrBufferTooSmall     = errors.New("buffer too small")
-	ErrNoDataAvailable    = errors.New("no data available in buffer")
-	ErrWriterFinished     = errors.New("writer has finished; no more data will be written")
-	ErrBufferRestarted    = errors.New("buffer was restarted; reader must reconfigure")
-	ErrReaderNotAttached  = errors.New("reader not attached to buffer")
+	ErrInvalidMagic          = errors.New("buffer magic value does not match")
+	ErrUnsupportedVersion    = errors.New("unsupported buffer version")
+	ErrInvalidChunkCount     = errors.New("chunk count is zero")
+	ErrBufferTooSmall        = errors.New("buffer too small")
+	ErrNoDataAvailable       = errors.New("no data available in buffer")
+	ErrWriterFinished        = errors.New("writer has finished; no more data will be written")
+	ErrBufferRestarted       = errors.New("buffer was restarted; reader must reconfigure")
+	ErrReaderNotAttached     = errors.New("reader not attached to buffer")
+	ErrReservedEntryLength   = errors.New("reserved entry length value encountered")
 )
 
 // ChunkInfo holds information about a chunk in the buffer.
@@ -341,25 +342,23 @@ func (r *Reader) ReadNextEntry() (*Entry, error) {
 
 		length := uint64(clearCommit32(lengthWithFlag))
 
+		// Handle special length values and normal entries
 		if length == 0 {
 			return nil, nil
-		}
-
-		if length == 1 {
+		} else if length == 1 {
 			if !r.jumpToChunk(0) {
 				return nil, nil
 			}
 			continue
-		}
-
-		if length == 3 {
+		} else if length == 2 {
+			// Reserved for future use
+			return nil, ErrReservedEntryLength
+		} else if length == 3 {
 			r.offset += EntryHeaderSize
 			r.offset = alignUp(r.offset, EntryAlignment)
 			r.writerFinished = true
 			return nil, ErrWriterFinished
-		}
-
-		if length < EntryHeaderSize {
+		} else if length < EntryHeaderSize {
 			panic("entry length smaller than header size")
 		}
 

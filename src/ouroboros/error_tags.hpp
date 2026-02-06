@@ -37,6 +37,7 @@ ERROR_TAG(takeover_writer_finished, "Cannot takeover: writer has finished.")
 ERROR_TAG(takeover_unexpected_wrap,
           "Cannot takeover: unexpected wrap found in buffer.")
 ERROR_TAG(takeover_buffer_overflow, "Cannot takeover: buffer overflow.")
+ERROR_TAG(reserved_entry_length, "Reserved entry length value encountered.")
 #else
 #error "Missing ERROR_TAG"
 #endif

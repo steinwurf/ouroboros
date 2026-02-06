@@ -656,8 +656,8 @@ TEST(test_reader_writer, reader_starting_chunk_selection)
 
 // Helper to generate a string entry consiting of the entry_counter followed by
 // a random number of characters to reach target size
-auto generate_entry(std::size_t entry_counter, std::size_t target_size)
-    -> std::string
+auto generate_entry(std::size_t entry_counter,
+                    std::size_t target_size) -> std::string
 {
     std::string entry = std::to_string(entry_counter);
     while (entry.size() < target_size)
@@ -1541,6 +1541,192 @@ TEST(test_reader_writer, writer_takeover_fresh_buffer)
     ASSERT_TRUE(entry.has_value());
     EXPECT_EQ(entry->data, "Test Entry");
 }
+
+TEST(test_reader_writer, writer_force_takeover_with_chunk_count_mismatch)
+{
+    constexpr std::size_t chunk_target_size = 1024;
+    constexpr std::size_t chunk_count_initial = 4;
+    constexpr std::size_t chunk_count_new = 3;
+    // Use the larger buffer size to accommodate both configurations
+    auto buffer_size = ouroboros::detail::buffer_format::compute_buffer_size(
+        chunk_target_size, chunk_count_initial);
+    auto buffer = create_aligned_buffer(buffer_size);
+    std::span<uint8_t> buffer_span(buffer);
+
+    // First writer initializes with chunk_count = 4
+    {
+        ouroboros::writer writer1;
+        auto result = writer1.configure(buffer_span, chunk_target_size,
+                                        chunk_count_initial);
+        ASSERT_TRUE(result.has_value());
+        writer1.write("Entry 1");
+        writer1.write("Entry 2");
+    }
+
+    // Second writer force takeover with different chunk_count
+    {
+        ouroboros::writer writer2;
+        auto result = writer2.configure(buffer_span, chunk_target_size,
+                                        chunk_count_new, 0, true);
+        ASSERT_TRUE(result.has_value()) << result.error().message();
+
+        // Should start fresh (buffer reinitialized)
+        EXPECT_EQ(writer2.total_entries_written(), 0U);
+        EXPECT_EQ(writer2.chunk_count(), chunk_count_new);
+
+        writer2.write("Entry 3");
+        EXPECT_EQ(writer2.total_entries_written(), 1U);
+    }
+
+    // Reader should only see the new entry
+    ouroboros::reader reader;
+    auto result = reader.configure(std::span<const uint8_t>(buffer_span));
+    ASSERT_TRUE(result.has_value());
+    EXPECT_EQ(reader.chunk_count(), chunk_count_new);
+
+    auto entry = reader.read_next_entry();
+    ASSERT_TRUE(entry.has_value());
+    EXPECT_EQ(entry->data, "Entry 3");
+}
+
+// ============================================================================
+// Parameterized Takeover Tests - Efficiently test all failure/recovery cases
+// ============================================================================
+
+struct TakeoverTestCase
+{
+    std::string name;
+    ouroboros::error expected_error;
+    // Setup function that creates the mismatch condition
+    std::function<void(std::span<uint8_t>, std::size_t, std::size_t, uint64_t)>
+        setup_mismatch;
+    // Parameters for second writer (chunk_target_size, chunk_count, buffer_id)
+    std::size_t second_chunk_target_size;
+    std::size_t second_chunk_count;
+    uint64_t second_buffer_id;
+};
+
+class WriterTakeoverTest : public ::testing::TestWithParam<TakeoverTestCase>
+{
+protected:
+    static constexpr std::size_t kChunkTargetSize = 1024;
+    static constexpr std::size_t kChunkCount = 4;
+    static constexpr uint64_t kBufferId = 42;
+
+    void SetUp() override
+    {
+        buffer_size_ =
+            ouroboros::detail::buffer_format::compute_buffer_size(
+                kChunkTargetSize, kChunkCount);
+        buffer_ = create_aligned_buffer(buffer_size_);
+        buffer_span_ = std::span<uint8_t>(buffer_);
+    }
+
+    std::size_t buffer_size_;
+    std::vector<uint8_t> buffer_;
+    std::span<uint8_t> buffer_span_;
+};
+
+TEST_P(WriterTakeoverTest, peaceful_takeover_fails_then_force_succeeds)
+{
+    const auto& test_case = GetParam();
+
+    // First writer initializes the buffer
+    {
+        ouroboros::writer writer1;
+        auto result = writer1.configure(buffer_span_, kChunkTargetSize,
+                                        kChunkCount, kBufferId);
+        ASSERT_TRUE(result.has_value()) << result.error().message();
+        writer1.write("Original Entry");
+    }
+
+    // Apply the mismatch setup if provided
+    if (test_case.setup_mismatch)
+    {
+        test_case.setup_mismatch(buffer_span_, kChunkTargetSize, kChunkCount,
+                                 kBufferId);
+    }
+
+    // Peaceful takeover should fail with expected error
+    {
+        ouroboros::writer writer2;
+        auto result = writer2.configure(
+            buffer_span_, test_case.second_chunk_target_size,
+            test_case.second_chunk_count, test_case.second_buffer_id, false);
+        ASSERT_FALSE(result.has_value())
+            << "Peaceful takeover should fail for: " << test_case.name;
+        EXPECT_EQ(result.error(),
+                  ouroboros::make_error_code(test_case.expected_error))
+            << "Wrong error for: " << test_case.name;
+    }
+
+    // Force takeover should succeed
+    {
+        ouroboros::writer writer3;
+        auto result = writer3.configure(
+            buffer_span_, test_case.second_chunk_target_size,
+            test_case.second_chunk_count, test_case.second_buffer_id, true);
+        ASSERT_TRUE(result.has_value())
+            << "Force takeover should succeed for: " << test_case.name
+            << " error: " << result.error().message();
+
+        // Should start fresh
+        EXPECT_EQ(writer3.total_entries_written(), 0U);
+
+        writer3.write("New Entry");
+        EXPECT_EQ(writer3.total_entries_written(), 1U);
+    }
+
+    // Verify the new entry is readable
+    ouroboros::reader reader;
+    auto result = reader.configure(std::span<const uint8_t>(buffer_span_));
+    ASSERT_TRUE(result.has_value());
+
+    auto entry = reader.read_next_entry();
+    ASSERT_TRUE(entry.has_value());
+    EXPECT_EQ(entry->data, "New Entry");
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    TakeoverCases, WriterTakeoverTest,
+    ::testing::Values(
+        TakeoverTestCase{
+            "chunk_count_mismatch",
+            ouroboros::error::takeover_chunk_count_mismatch,
+            nullptr, // No buffer modification needed
+            1024,    // same chunk_target_size
+            3,       // different chunk_count
+            42       // same buffer_id
+        },
+        TakeoverTestCase{
+            "buffer_id_mismatch",
+            ouroboros::error::takeover_buffer_id_mismatch,
+            nullptr, // No buffer modification needed
+            1024,    // same chunk_target_size
+            4,       // same chunk_count
+            999      // different buffer_id
+        },
+        TakeoverTestCase{
+            "writer_finished",
+            ouroboros::error::takeover_writer_finished,
+            [](std::span<uint8_t> buffer, std::size_t chunk_target_size,
+               std::size_t chunk_count, uint64_t buffer_id) {
+                // Call finish on the buffer
+                ouroboros::writer finisher;
+                auto result = finisher.configure(buffer, chunk_target_size,
+                                                 chunk_count, buffer_id);
+                if (result.has_value())
+                {
+                    finisher.finish();
+                }
+            },
+            1024, // same chunk_target_size
+            4,    // same chunk_count
+            42    // same buffer_id
+        }),
+    [](const ::testing::TestParamInfo<TakeoverTestCase>& info) {
+        return info.param.name;
+    });
 
 TEST(test_reader_writer, writer_configure_returns_expected)
 {

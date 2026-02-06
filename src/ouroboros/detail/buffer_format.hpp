@@ -97,8 +97,8 @@ inline constexpr auto chunk_token(std::span<Byte> buffer)
 /// Calculate the size of the buffer header needed for a given chunk count
 /// @param chunk_count The number of chunks
 /// @return The size of the buffer header needed for the given chunk count
-inline constexpr auto compute_buffer_header_size(std::size_t chunk_count)
-    -> std::size_t
+inline constexpr auto
+compute_buffer_header_size(std::size_t chunk_count) -> std::size_t
 {
     return buffer_header_size + (chunk_count * chunk_row_size);
 }
@@ -112,9 +112,9 @@ inline constexpr auto compute_buffer_header_size(std::size_t chunk_count)
 /// @param chunk_count The number of chunks
 /// @return The size of the buffer needed for the given chunk target size and
 /// chunk count
-inline constexpr auto compute_buffer_size(std::size_t chunk_target_size,
-                                          std::size_t chunk_count)
-    -> std::size_t
+inline constexpr auto
+compute_buffer_size(std::size_t chunk_target_size,
+                    std::size_t chunk_count) -> std::size_t
 {
     return compute_buffer_header_size(chunk_count) +
            (chunk_target_size * chunk_count);
@@ -124,8 +124,8 @@ inline constexpr auto compute_buffer_size(std::size_t chunk_target_size,
 /// @param size The size to align
 /// @param align The alignment requirement (must be a power of 2)
 /// @return The aligned size
-inline constexpr auto align_up(std::size_t size, std::size_t align)
-    -> std::size_t
+inline constexpr auto align_up(std::size_t size,
+                               std::size_t align) -> std::size_t
 {
     return (size + align - 1) & ~(align - 1);
 }
@@ -197,8 +197,8 @@ inline void write_value(std::span<uint8_t> buffer, T value)
 /// @param buffer The buffer containing the chunk table
 /// @param chunk_index The index of the chunk
 /// @return A span to the chunk row
-inline auto chunk_row(std::span<const uint8_t> buffer, std::size_t chunk_index)
-    -> std::span<const uint8_t>
+inline auto chunk_row(std::span<const uint8_t> buffer,
+                      std::size_t chunk_index) -> std::span<const uint8_t>
 {
     return buffer.subspan(chunk_row_offset(chunk_index), chunk_row_size);
 }
@@ -207,8 +207,8 @@ inline auto chunk_row(std::span<const uint8_t> buffer, std::size_t chunk_index)
 /// @param buffer The buffer containing the chunk table
 /// @param chunk_index The index of the chunk
 /// @return A span to the chunk row
-inline auto chunk_row(std::span<uint8_t> buffer, std::size_t chunk_index)
-    -> std::span<uint8_t>
+inline auto chunk_row(std::span<uint8_t> buffer,
+                      std::size_t chunk_index) -> std::span<uint8_t>
 {
     return buffer.subspan(chunk_row_offset(chunk_index), chunk_row_size);
 }

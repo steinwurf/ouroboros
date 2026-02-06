@@ -349,8 +349,8 @@ public:
 
         auto header = detail::buffer_format::entry_header(
             m_buffer.subspan(m_offset, total_entry_size));
-        // Length 1 with commit flag set (MSB = 1)
         VERIFY(!detail::buffer_format::is_committed(total_entry_size));
+        // Write the total entry size without the commit flag
         detail::atomic::store_release(header, total_entry_size);
 
         // Write entry payload
@@ -408,18 +408,11 @@ public:
         // Check if we have space for the finish entry (header only)
         const std::size_t remaining_space =
             (m_offset > m_buffer.size()) ? 0 : m_buffer.size() - m_offset;
+        
+        // Check if we have enough space for the finish entry
         if (remaining_space < detail::buffer_format::entry_header_size)
         {
-            // Wrap first, then write finish
-            if (remaining_space >= detail::buffer_format::entry_header_size)
-            {
-                auto header =
-                    detail::buffer_format::entry_header(m_buffer.subspan(
-                        m_offset, detail::buffer_format::entry_header_size));
-                detail::atomic::store_release(header,
-                                              detail::buffer_format::set_commit(
-                                                  static_cast<uint32_t>(1)));
-            }
+            // We do not have enough space. Let's wrap
             m_current_chunk_index = 0;
             m_offset = detail::buffer_format::compute_buffer_header_size(
                 m_chunk_count);
@@ -455,11 +448,9 @@ public:
     auto max_entry_size() const -> std::size_t
     {
         VERIFY(!m_buffer.empty(), "Writer not configured");
-        auto header_and_chunk_table =
-            detail::buffer_format::buffer_header_size +
-            (m_chunk_count * detail::buffer_format::chunk_row_size);
-        header_and_chunk_table = detail::buffer_format::align_up(
-            header_and_chunk_table, detail::buffer_format::entry_alignment);
+        auto header_and_chunk_table = detail::buffer_format::align_up(
+            detail::buffer_format::compute_buffer_header_size(m_chunk_count),
+            detail::buffer_format::entry_alignment);
         auto usable_size = m_buffer.size() - header_and_chunk_table;
         return usable_size - detail::buffer_format::entry_header_size;
     }
@@ -500,11 +491,10 @@ private:
     ///         - takeover_chunk_count_mismatch: Chunk count doesn't match
     ///         - takeover_buffer_size_mismatch: Buffer size doesn't match
     ///         - takeover_buffer_id_mismatch: Buffer ID doesn't match
-    static auto peaceful_takeover_possible(std::span<const uint8_t> buffer,
-                                           std::size_t chunk_target_size,
-                                           std::size_t chunk_count,
-                                           uint64_t buffer_id)
-        -> tl::expected<resume_info, std::error_code>
+    static auto peaceful_takeover_possible(
+        std::span<const uint8_t> buffer, std::size_t chunk_target_size,
+        std::size_t chunk_count,
+        uint64_t buffer_id) -> tl::expected<resume_info, std::error_code>
     {
         VERIFY(detail::buffer_format::is_initialized(buffer),
                "Buffer is not initialized");
