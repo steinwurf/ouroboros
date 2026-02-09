@@ -154,19 +154,27 @@ class Entry:
     entry is still valid (has not been overwritten) before using the data.
     """
 
-    __slots__ = ("_data", "_chunk_info", "_sequence_number", "_chunk_row_view")
+    __slots__ = (
+        "_data",
+        "_chunk_info",
+        "_sequence_number",
+        "_buffer_view",
+        "_buffer_id",
+    )
 
     def __init__(
         self,
         data: bytes,
         chunk_info: ChunkInfo,
         sequence_number: int,
-        chunk_row_view: memoryview,
+        buffer_view: memoryview,
+        buffer_id: int,
     ) -> None:
         self._data = data
         self._chunk_info = chunk_info
         self._sequence_number = sequence_number
-        self._chunk_row_view = chunk_row_view
+        self._buffer_view = buffer_view
+        self._buffer_id = buffer_id
 
     @property
     def data(self) -> bytes:
@@ -186,13 +194,19 @@ class Entry:
     def is_valid(self) -> bool:
         """Check if the entry is still valid (chunk has not been overwritten).
 
-        Re-reads the chunk token from the buffer (via the stored chunk row view)
-        and compares with the token at read time. If they match, the entry was
-        not overwritten. Returns False if the buffer is no longer available
+        Re-reads the buffer ID and chunk token from the buffer and compares
+        with the values at read time. If both match, the entry was not
+        overwritten. Returns False if the buffer is no longer available
         (e.g. reader was closed).
         """
         try:
-            current_token = _load_acquire_u64(self._chunk_row_view, 8)
+            current_id = _load_acquire_u64(self._buffer_view, 16)
+            if current_id != self._buffer_id:
+                return False
+            chunk_row_offset = (
+                BUFFER_HEADER_SIZE + self._chunk_info.index * CHUNK_ROW_SIZE
+            )
+            current_token = _load_acquire_u64(self._buffer_view, chunk_row_offset + 8)
             return self._chunk_info.token == current_token
         except (ValueError, TypeError):
             # Buffer was released (reader closed) or similar
@@ -558,15 +572,12 @@ class Reader:
                 offset=self._get_chunk_offset(self._current_chunk_index),
                 is_committed=True,
             )
-            chunk_row_offset = self._chunk_row_offset(self._current_chunk_index)
-            chunk_row_view = memoryview(self._buffer)[
-                chunk_row_offset : chunk_row_offset + CHUNK_ROW_SIZE
-            ]
             entry = Entry(
                 data=payload,
                 chunk_info=chunk_info,
                 sequence_number=sequence_number,
-                chunk_row_view=chunk_row_view,
+                buffer_view=memoryview(self._buffer),
+                buffer_id=self._buffer_id,
             )
 
             log.debug(

@@ -58,13 +58,13 @@ public:
                          ? detail::buffer_format::clear_commit(
                                offset_and_commit_flag)
                          : 0),
-            m_index(index),
-            m_is_committed(
-                detail::buffer_format::is_committed(offset_and_commit_flag))
+            m_index(index), m_is_committed(detail::buffer_format::is_committed(
+                                offset_and_commit_flag))
         {
         }
 
-        constexpr chunk_info& operator=(const chunk_info& other) noexcept = default;
+        constexpr chunk_info&
+        operator=(const chunk_info& other) noexcept = default;
 
         constexpr bool is_committed() const
         {
@@ -100,7 +100,8 @@ public:
     /// IMPORTANT: Validity Contract
     /// ----------------------------
     /// The `data` member is a std::string_view pointing directly into shared
-    /// memory. This zero-copy design is efficient but requires careful handling:
+    /// memory. This zero-copy design is efficient but requires careful
+    /// handling:
     ///
     /// 1. The entry may be invalidated at any time by the writer overwriting
     ///    the underlying memory.
@@ -128,25 +129,37 @@ public:
     /// handles the validity check internally.
     struct entry
     {
-        entry(std::string_view data, std::span<const uint8_t> chunk_row,
-              uint64_t chunk_token, uint64_t sequence_number) :
-            data(data), chunk_row(chunk_row), chunk_token(chunk_token),
-            sequence_number(sequence_number)
+        entry(std::string_view data, std::span<const uint8_t> buffer,
+              std::size_t chunk_index, uint64_t chunk_token,
+              uint64_t sequence_number, uint64_t buffer_id) :
+            data(data), buffer(buffer), chunk_index(chunk_index),
+            chunk_token(chunk_token), sequence_number(sequence_number),
+            buffer_id(buffer_id)
         {
         }
 
         const std::string_view data;
-        const std::span<const uint8_t> chunk_row;
+        const std::span<const uint8_t> buffer;
+        const std::size_t chunk_index;
         const uint64_t chunk_token;
         const uint64_t sequence_number;
+        const uint64_t buffer_id;
 
         /// Check if the entry data is still valid.
-        /// @return true if the chunk token hasn't changed since reading,
-        ///         meaning the data is safe to use.
+        /// @return true if the chunk token and buffer ID haven't changed
+        ///         since reading, meaning the data is safe to use.
         bool is_valid() const
         {
-            const uint64_t current_token = detail::atomic::load_acquire(
-                detail::buffer_format::chunk_token(chunk_row));
+            const uint64_t current_id =
+                detail::atomic::load_acquire(reinterpret_cast<const uint64_t*>(
+                    buffer.data() + detail::buffer_format::buffer_id_offset));
+            if (current_id != buffer_id)
+            {
+                return false;
+            }
+            const uint64_t current_token =
+                detail::atomic::load_acquire(detail::buffer_format::chunk_token(
+                    detail::buffer_format::chunk_row(buffer, chunk_index)));
             return chunk_token == current_token;
         }
     };
@@ -426,10 +439,9 @@ public:
                 // in this chunk
                 const uint64_t sequence_number =
                     m_current_chunk.token() + m_entries_read_in_current_chunk;
-                return entry(payload_view,
-                             detail::buffer_format::chunk_row(
-                                 m_buffer, m_current_chunk.index()),
-                             m_current_chunk.token(), sequence_number);
+                return entry(payload_view, m_buffer, m_current_chunk.index(),
+                             m_current_chunk.token(), sequence_number,
+                             m_buffer_id);
             }
         }
     }
@@ -514,8 +526,8 @@ private:
     }
 
     static auto find_chunk(std::span<const uint8_t> buffer,
-                           std::size_t chunk_count,
-                           read_strategy strategy) -> chunk_info
+                           std::size_t chunk_count, read_strategy strategy)
+        -> chunk_info
     {
         switch (strategy)
         {
@@ -540,9 +552,9 @@ private:
         return {};
     }
 
-    static auto
-    find_chunk_with_highest_token(std::span<const uint8_t> buffer,
-                                  std::size_t chunk_count) -> chunk_info
+    static auto find_chunk_with_highest_token(std::span<const uint8_t> buffer,
+                                              std::size_t chunk_count)
+        -> chunk_info
     {
         chunk_info best_chunk = get_chunk_info(buffer, 0);
         for (std::size_t i = 1; i < chunk_count; ++i)
@@ -566,9 +578,9 @@ private:
         return best_chunk;
     }
 
-    static auto
-    find_chunk_with_lowest_token(std::span<const uint8_t> buffer,
-                                 std::size_t chunk_count) -> chunk_info
+    static auto find_chunk_with_lowest_token(std::span<const uint8_t> buffer,
+                                             std::size_t chunk_count)
+        -> chunk_info
     {
         chunk_info best_chunk = get_chunk_info(buffer, 0);
         for (std::size_t i = 1; i < chunk_count; ++i)

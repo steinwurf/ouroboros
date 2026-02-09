@@ -49,15 +49,15 @@ const (
 
 // Reader errors
 var (
-	ErrInvalidMagic          = errors.New("buffer magic value does not match")
-	ErrUnsupportedVersion    = errors.New("unsupported buffer version")
-	ErrInvalidChunkCount     = errors.New("chunk count is zero")
-	ErrBufferTooSmall        = errors.New("buffer too small")
-	ErrNoDataAvailable       = errors.New("no data available in buffer")
-	ErrWriterFinished        = errors.New("writer has finished; no more data will be written")
-	ErrBufferRestarted       = errors.New("buffer was restarted; reader must reconfigure")
-	ErrReaderNotAttached     = errors.New("reader not attached to buffer")
-	ErrReservedEntryLength   = errors.New("reserved entry length value encountered")
+	ErrInvalidMagic        = errors.New("buffer magic value does not match")
+	ErrUnsupportedVersion  = errors.New("unsupported buffer version")
+	ErrInvalidChunkCount   = errors.New("chunk count is zero")
+	ErrBufferTooSmall      = errors.New("buffer too small")
+	ErrNoDataAvailable     = errors.New("no data available in buffer")
+	ErrWriterFinished      = errors.New("writer has finished; no more data will be written")
+	ErrBufferRestarted     = errors.New("buffer was restarted; reader must reconfigure")
+	ErrReaderNotAttached   = errors.New("reader not attached to buffer")
+	ErrReservedEntryLength = errors.New("reserved entry length value encountered")
 )
 
 // ChunkInfo holds information about a chunk in the buffer.
@@ -74,16 +74,23 @@ type Entry struct {
 	Data           []byte
 	ChunkInfo      ChunkInfo
 	SequenceNumber uint64
-	chunkRowView   []byte // live view into buffer for IsValid; invalid after Reader.Close
+	buffer         []byte // live view into full buffer for IsValid; invalid after Reader.Close
+	bufferID       uint64 // buffer ID at the time the entry was read
 }
 
-// IsValid checks if the entry is still valid (chunk has not been overwritten).
+// IsValid checks if the entry is still valid (chunk has not been overwritten
+// and buffer has not been restarted).
 // Must not be called after Reader.Close().
 func (e *Entry) IsValid() bool {
-	if e.chunkRowView == nil || len(e.chunkRowView) < 16 {
+	if e.buffer == nil || len(e.buffer) < int(BufferHeaderSize) {
 		return false
 	}
-	currentToken := loadAcquireU64(e.chunkRowView, 8)
+	currentID := loadAcquireU64(e.buffer, 16)
+	if currentID != e.bufferID {
+		return false
+	}
+	row := chunkRow(e.buffer, e.ChunkInfo.Index)
+	currentToken := loadAcquireU64(row, 8)
 	return e.ChunkInfo.Token == currentToken
 }
 
@@ -377,13 +384,13 @@ func (r *Reader) ReadNextEntry() (*Entry, error) {
 		r.entriesReadInChunk++
 
 		seqNum := r.currentChunk.Token + r.entriesReadInChunk
-		chunkRowView := chunkRow(r.buffer, r.currentChunk.Index)
 
 		return &Entry{
 			Data:           payload,
 			ChunkInfo:      r.currentChunk,
 			SequenceNumber: seqNum,
-			chunkRowView:   chunkRowView,
+			buffer:         r.buffer,
+			bufferID:       r.bufferID,
 		}, nil
 	}
 }
