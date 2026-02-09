@@ -60,8 +60,8 @@ TEST(test_shm, buffer_id)
     auto shm_name = generate_shm_name();
 
     ouroboros::shm_log_writer writer;
-    auto writer_result = writer.configure(shm_name, chunk_target_size,
-                                          chunk_count, false, test_buffer_id);
+    auto writer_result = writer.configure(
+        shm_name, chunk_target_size, chunk_count, test_buffer_id, false, false);
     ASSERT_TRUE(writer_result.has_value());
 
     EXPECT_EQ(writer.buffer_id(), test_buffer_id);
@@ -182,8 +182,8 @@ TEST(test_shm, writer_finish_reader_unlinks_shm)
     auto shm_name = generate_shm_name();
 
     ouroboros::shm_log_writer writer;
-    auto writer_result =
-        writer.configure(shm_name, chunk_target_size, chunk_count, false);
+    auto writer_result = writer.configure(shm_name, chunk_target_size,
+                                          chunk_count, 0, false, false);
     ASSERT_TRUE(writer_result.has_value());
 
     writer.write("Entry 1");

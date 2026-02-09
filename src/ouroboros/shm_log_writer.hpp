@@ -87,8 +87,8 @@ public:
     /// @return Error if configuration fails
     auto
     configure(const std::string& shm_name, std::size_t chunk_target_size,
-              std::size_t chunk_count, bool should_unlink = true,
-              uint64_t buffer_id = 0) -> tl::expected<void, std::error_code>
+              std::size_t chunk_count, uint64_t buffer_id = 0, bool force_takeover = false,
+              bool should_unlink = true) -> tl::expected<void, std::error_code>
     {
         VERIFY(chunk_count > 0, "chunk_count must be greater than 0");
         VERIFY(!shm_name.empty(), "shm_name must not be empty");
@@ -118,7 +118,7 @@ public:
         m_writer.configure(
             std::span<uint8_t>(static_cast<uint8_t*>(m_buffer_ptr),
                                m_buffer_size),
-            chunk_target_size, chunk_count, buffer_id);
+            chunk_target_size, chunk_count, buffer_id, force_takeover);
 
         return {};
     }
