@@ -11,6 +11,7 @@
 #include <string>
 #include <string_view>
 
+#include "ouroboros/detail/buffer_format.hpp"
 #include "shm_platform.hpp"
 #include "version.hpp"
 #include "writer.hpp"
@@ -77,18 +78,26 @@ public:
 
     /// Configure the shared memory log writer
     ///
+    /// If the shared memory segment already exists, the writer will attempt
+    /// to resume from the previous writer and continue appending entries
+    /// where it left off. If the resume fails (e.g. due to a buffer ID
+    /// mismatch), the returned configure_error will contain the existing
+    /// buffer_id from the shared memory segment.
+    ///
     /// @param shm_name Name of the shared memory segment (must start with '/'
     ///                 on POSIX systems)
     /// @param chunk_target_size Target size of each chunk in bytes
     /// @param chunk_count Number of chunks (must be > 0)
+    /// @param buffer_id 64-bit ID stored in the buffer header (default: 0)
+    /// @param force_init If true, forces reinitialization of an existing
+    ///                   shared memory segment (default: false)
     /// @param should_unlink If true, unlink the shared memory segment on
     ///                      destruction (default: true)
-    /// @param buffer_id 64-bit ID stored in the buffer header (default: 0)
     /// @return Error if configuration fails
-    auto
-    configure(const std::string& shm_name, std::size_t chunk_target_size,
-              std::size_t chunk_count, uint64_t buffer_id = 0, bool force_takeover = false,
-              bool should_unlink = true) -> tl::expected<void, std::error_code>
+    auto configure(const std::string& shm_name, std::size_t chunk_target_size,
+                   std::size_t chunk_count, uint64_t buffer_id = 0,
+                   bool force_init = false, bool should_unlink = true)
+        -> tl::expected<void, configure_error>
     {
         VERIFY(chunk_count > 0, "chunk_count must be greater than 0");
         VERIFY(!shm_name.empty(), "shm_name must not be empty");
@@ -98,27 +107,42 @@ public:
             detail::buffer_format::compute_buffer_size(chunk_target_size,
                                                        chunk_count);
 
-        // Create and map shared memory
-        auto result = create_and_map_shm(shm_name, required_size);
-        if (!result)
+        // Create or open the shared memory segment
+        auto shm_result = create_or_open_and_map_shm(shm_name, required_size);
+        if (!shm_result)
         {
-            return tl::make_unexpected(result.error());
+            return tl::make_unexpected(configure_error{shm_result.error()});
         }
 
+        // Only zero-initialize if we created a new segment
+        if (shm_result->created)
+        {
+            // Zero out the buffer header and chunk table
+            std::memset(
+                shm_result->ptr, 0,
+                detail::buffer_format::compute_buffer_header_size(chunk_count));
+        }
+
+        // Configure the writer with the mapped buffer.
+        // If the segment already existed, the writer will try to resume.
+        auto writer_result = m_writer.configure(
+            std::span<uint8_t>(static_cast<uint8_t*>(shm_result->ptr),
+                               shm_result->size),
+            chunk_target_size, chunk_count, buffer_id, force_init);
+
+        if (!writer_result)
+        {
+            // Just unmap, never unlink — we don't own the segment yet
+            unmap_shm(shm_result->handle, shm_result->ptr, shm_result->size);
+            return tl::make_unexpected(writer_result.error());
+        }
+
+        // Success — commit state
         m_shm_name = shm_name;
-        m_shm_handle = result->first;
-        m_buffer_ptr = result->second;
-        m_buffer_size = required_size;
+        m_shm_handle = shm_result->handle;
+        m_buffer_ptr = shm_result->ptr;
+        m_buffer_size = shm_result->size;
         m_should_unlink = should_unlink;
-
-        // Initialize the buffer to zero
-        std::memset(m_buffer_ptr, 0, m_buffer_size);
-
-        // Configure the writer with the mapped buffer
-        m_writer.configure(
-            std::span<uint8_t>(static_cast<uint8_t*>(m_buffer_ptr),
-                               m_buffer_size),
-            chunk_target_size, chunk_count, buffer_id, force_takeover);
 
         return {};
     }

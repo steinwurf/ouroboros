@@ -29,13 +29,26 @@ struct shm_handle
     bool is_valid() const;
 };
 
-/// Create and map a shared memory segment for writing (Windows implementation)
+/// Result of a create-or-open shared memory operation
+struct shm_mapping
+{
+    shm_handle handle;
+    void* ptr = nullptr;
+    std::size_t size = 0;
+    bool created = false; ///< true if newly created, false if opened existing
+};
+
+/// Create or open and map a shared memory segment for writing (Windows
+/// implementation)
+///
+/// Tries to exclusively create the segment first. If it already exists,
+/// opens the existing segment with read-write access instead.
 ///
 /// @param name Name of the shared memory segment
-/// @param size Size of the shared memory segment in bytes
-/// @return A tuple of (handle, mapped pointer) or an error
-auto create_and_map_shm(const std::string& name, std::size_t size)
-    -> tl::expected<std::pair<shm_handle, void*>, std::error_code>;
+/// @param size Size of the shared memory segment in bytes (used when creating)
+/// @return An shm_mapping or an error
+auto create_or_open_and_map_shm(const std::string& name, std::size_t size)
+    -> tl::expected<shm_mapping, std::error_code>;
 
 /// Open and map an existing shared memory segment for reading (Windows
 /// implementation)

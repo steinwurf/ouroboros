@@ -40,10 +40,10 @@ bool shm_handle::is_valid() const
     return handle != nullptr;
 }
 
-auto create_and_map_shm(const std::string& name, std::size_t size)
-    -> tl::expected<std::pair<shm_handle, void*>, std::error_code>
+auto create_or_open_and_map_shm(const std::string& name, std::size_t size)
+    -> tl::expected<shm_mapping, std::error_code>
 {
-    // Windows uses CreateFileMapping
+    // Try to create a new file mapping
     HANDLE hMap =
         CreateFileMappingA(INVALID_HANDLE_VALUE, nullptr, PAGE_READWRITE, 0,
                            static_cast<DWORD>(size), name.c_str());
@@ -53,13 +53,55 @@ auto create_and_map_shm(const std::string& name, std::size_t size)
             make_error_code(ouroboros::error::shared_memory_create_failed));
     }
 
-    if (GetLastError() == ERROR_ALREADY_EXISTS)
+    const bool already_exists = (GetLastError() == ERROR_ALREADY_EXISTS);
+
+    if (already_exists)
     {
+        // Segment already exists - close the handle from CreateFileMapping
+        // and re-open with OpenFileMapping to get the existing size
         CloseHandle(hMap);
-        return tl::make_unexpected(
-            make_error_code(ouroboros::error::shared_memory_exists));
+
+        hMap = OpenFileMappingA(FILE_MAP_ALL_ACCESS, FALSE, name.c_str());
+        if (hMap == nullptr)
+        {
+            if (GetLastError() == ERROR_FILE_NOT_FOUND)
+            {
+                return tl::make_unexpected(make_error_code(
+                    ouroboros::error::shared_memory_not_found));
+            }
+            return tl::make_unexpected(
+                make_error_code(ouroboros::error::shared_memory_open_failed));
+        }
+
+        void* ptr = MapViewOfFile(hMap, FILE_MAP_ALL_ACCESS, 0, 0, 0);
+        if (ptr == nullptr)
+        {
+            CloseHandle(hMap);
+            return tl::make_unexpected(
+                make_error_code(ouroboros::error::shared_memory_map_failed));
+        }
+
+        MEMORY_BASIC_INFORMATION mbi;
+        if (VirtualQuery(ptr, &mbi, sizeof(mbi)) == 0)
+        {
+            UnmapViewOfFile(ptr);
+            CloseHandle(hMap);
+            return tl::make_unexpected(
+                make_error_code(ouroboros::error::shared_memory_stat_failed));
+        }
+
+        const std::size_t existing_size =
+            static_cast<std::size_t>(mbi.RegionSize);
+
+        VERIFY(reinterpret_cast<uintptr_t>(ptr) % 8 == 0,
+               "Mapped shared memory is not 8-byte aligned");
+
+        shm_handle handle;
+        handle.handle = reinterpret_cast<void*>(hMap);
+        return shm_mapping{handle, ptr, existing_size, false};
     }
 
+    // Newly created
     void* ptr = MapViewOfFile(hMap, FILE_MAP_ALL_ACCESS, 0, 0, size);
     if (ptr == nullptr)
     {
@@ -73,7 +115,7 @@ auto create_and_map_shm(const std::string& name, std::size_t size)
 
     shm_handle handle;
     handle.handle = reinterpret_cast<void*>(hMap);
-    return std::make_pair(handle, ptr);
+    return shm_mapping{handle, ptr, size, true};
 }
 
 auto open_and_map_shm(const std::string& name)

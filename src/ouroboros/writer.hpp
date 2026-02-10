@@ -129,7 +129,7 @@ public:
     /// Default constructor
     writer() = default;
 
-    /// Information about where to resume writing after a takeover
+    /// Information about where to resume writing
     struct resume_info
     {
         std::size_t offset;      ///< Byte offset where to continue writing
@@ -141,7 +141,7 @@ public:
     ///
     /// If the buffer is already initialized with matching parameters (magic,
     /// version, chunk_count, buffer_size, and buffer_id), the writer will
-    /// attempt to take over from the previous writer and continue appending
+    /// attempt to resume from the previous writer and continue appending
     /// entries where it left off.
     ///
     /// @param buffer View of the buffer to write to (must be at least
@@ -151,14 +151,14 @@ public:
     /// @param chunk_count Number of chunks (must be > 0)
     /// @param buffer_id 64-bit ID stored in the buffer header (e.g. for
     ///                  identifying the log instance)
-    /// @param force_takeover If true, allows forceful takeover.
+    /// @param force_init If true, forces reinitialization of the buffer.
     ///          It will overwrite the values in the buffer header to the new
     ///          values and reset the current chunk index to 0.
     /// @return void on success, or an error_code indicating what failed.
     auto configure(std::span<uint8_t> buffer, std::size_t chunk_target_size,
                    std::size_t chunk_count, uint64_t buffer_id = 0,
-                   bool force_takeover = false)
-        -> tl::expected<void, std::error_code>
+                   bool force_init = false)
+        -> tl::expected<void, configure_error>
     {
         VERIFY(buffer.data() != nullptr, "Buffer span must not be null!");
         VERIFY(buffer.size() > 0, "Buffer span must not be empty!");
@@ -180,10 +180,10 @@ public:
         {
             // Buffer is previously initialized
 
-            // Check if we can do a "peaceful" takeover and just carry on
-            // writing where the previous writer left off.
-            auto result = peaceful_takeover_possible(buffer, chunk_target_size,
-                                                     chunk_count, buffer_id);
+            // Check if we can resume writing where the previous writer
+            // left off.
+            auto result =
+                try_resume(buffer, chunk_target_size, chunk_count, buffer_id);
             if (result.has_value())
             {
                 const auto& info = result.value();
@@ -198,7 +198,7 @@ public:
                 return {};
             }
 
-            if (!force_takeover)
+            if (!force_init)
             {
                 return tl::make_unexpected(result.error());
             }
@@ -230,6 +230,9 @@ public:
         initialize_chunk(
             detail::buffer_format::chunk_row(m_buffer, m_current_chunk_index),
             m_offset, m_total_entries_written);
+        // Zero out the first entry header
+        std::memset(m_buffer.data() + m_offset, 0,
+                    detail::buffer_format::entry_header_size);
         commit_chunk(m_buffer, m_current_chunk_index);
 
         return {};
@@ -408,7 +411,7 @@ public:
         // Check if we have space for the finish entry (header only)
         const std::size_t remaining_space =
             (m_offset > m_buffer.size()) ? 0 : m_buffer.size() - m_offset;
-        
+
         // Check if we have enough space for the finish entry
         if (remaining_space < detail::buffer_format::entry_header_size)
         {
@@ -482,30 +485,43 @@ public:
     }
 
 private:
-    /// Check if a peaceful takeover is possible
+    /// Try to resume writing in an existing buffer where the previous writer
+    /// left off. Validates that the buffer configuration matches, then finds
+    /// the resume position.
     /// @param buffer The buffer to check
     /// @param chunk_target_size The target size of each chunk
     /// @param chunk_count The number of chunks
     /// @param buffer_id The buffer ID
-    /// @return resume_info on success, or an error_code indicating what failed:
-    ///         - takeover_chunk_count_mismatch: Chunk count doesn't match
-    ///         - takeover_buffer_size_mismatch: Buffer size doesn't match
-    ///         - takeover_buffer_id_mismatch: Buffer ID doesn't match
-    static auto peaceful_takeover_possible(
-        std::span<const uint8_t> buffer, std::size_t chunk_target_size,
-        std::size_t chunk_count,
-        uint64_t buffer_id) -> tl::expected<resume_info, std::error_code>
+    /// @return resume_info on success, or a configure_error indicating what
+    ///         failed (includes the existing buffer_id for error context):
+    ///         - resume_chunk_count_mismatch: Chunk count doesn't match
+    ///         - resume_buffer_size_mismatch: Buffer size doesn't match
+    ///         - resume_buffer_id_mismatch: Buffer ID doesn't match
+    ///         - resume_buffer_overflow: Buffer overflow while scanning
+    ///         - resume_unexpected_wrap: Unexpected wrap entry found
+    ///         - resume_writer_finished: Previous writer finished
+    static auto try_resume(std::span<const uint8_t> buffer,
+                           std::size_t chunk_target_size,
+                           std::size_t chunk_count,
+                           uint64_t buffer_id)
+        -> tl::expected<resume_info, configure_error>
     {
         VERIFY(detail::buffer_format::is_initialized(buffer),
                "Buffer is not initialized");
+
+        // Read the existing buffer ID for error context
+        const uint64_t existing_buffer_id =
+            detail::atomic::load_acquire(reinterpret_cast<const uint64_t*>(
+                buffer.data() + detail::buffer_format::buffer_id_offset));
 
         // Read and verify chunk count
         const uint32_t existing_chunk_count =
             detail::buffer_format::read_value<uint32_t>(buffer.data() + 12);
         if (existing_chunk_count != chunk_count)
         {
-            return tl::make_unexpected(make_error_code(
-                ouroboros::error::takeover_chunk_count_mismatch));
+            return tl::make_unexpected(configure_error{
+                make_error_code(ouroboros::error::resume_chunk_count_mismatch),
+                existing_buffer_id});
         }
 
         // Verify buffer size matches expected size
@@ -517,33 +533,19 @@ private:
             chunks_size;
         if (buffer.size() < expected_buffer_size)
         {
-            return tl::make_unexpected(make_error_code(
-                ouroboros::error::takeover_buffer_size_mismatch));
+            return tl::make_unexpected(configure_error{
+                make_error_code(ouroboros::error::resume_buffer_size_mismatch),
+                existing_buffer_id});
         }
 
-        // Read and verify buffer ID (unless force_takeover is set)
-        const uint64_t existing_buffer_id =
-            detail::atomic::load_acquire(reinterpret_cast<const uint64_t*>(
-                buffer.data() + detail::buffer_format::buffer_id_offset));
+        // Verify buffer ID
         if (existing_buffer_id != buffer_id)
         {
-            return tl::make_unexpected(
-                make_error_code(ouroboros::error::takeover_buffer_id_mismatch));
+            return tl::make_unexpected(configure_error{
+                make_error_code(ouroboros::error::resume_buffer_id_mismatch),
+                existing_buffer_id});
         }
 
-        // Resume position
-        return resume_position(buffer, chunk_count);
-    }
-
-    /// Find the position where the previous writer left off and set up state
-    /// to continue from there
-    /// @param buffer The buffer to check
-    /// @param chunk_count The number of chunks
-    /// @return resume_info on success, or an error_code indicating what failed.
-    static auto resume_position(std::span<const uint8_t> buffer,
-                                std::size_t chunk_count)
-        -> tl::expected<resume_info, std::error_code>
-    {
         // Find the chunk with the highest token
         std::size_t highest_token = 0;
         std::size_t highest_token_chunk_index = 0;
@@ -575,8 +577,9 @@ private:
                 buffer.size() - detail::buffer_format::entry_header_size)
             {
                 // Buffer overflow
-                return tl::make_unexpected(make_error_code(
-                    ouroboros::error::takeover_buffer_overflow));
+                return tl::make_unexpected(configure_error{
+                    make_error_code(ouroboros::error::resume_buffer_overflow),
+                    existing_buffer_id});
             }
 
             auto length_with_flag = detail::atomic::load_acquire(
@@ -597,13 +600,17 @@ private:
                     // Entry is a wrap - this is unexpected.
                     // The previous writer should have updated the chunk table
                     // such that the first chunk would have the highest token.
-                    return tl::make_unexpected(make_error_code(
-                        ouroboros::error::takeover_unexpected_wrap));
+                    return tl::make_unexpected(configure_error{
+                        make_error_code(
+                            ouroboros::error::resume_unexpected_wrap),
+                        existing_buffer_id});
                 }
                 else if (length == 3)
                 {
-                    return tl::make_unexpected(make_error_code(
-                        ouroboros::error::takeover_writer_finished));
+                    return tl::make_unexpected(configure_error{
+                        make_error_code(
+                            ouroboros::error::resume_writer_finished),
+                        existing_buffer_id});
                 }
                 else
                 {

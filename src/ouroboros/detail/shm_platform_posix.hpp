@@ -34,53 +34,104 @@ struct shm_handle
     }
 };
 
-/// Create and map a shared memory segment for writing (POSIX implementation)
+/// Result of a create-or-open shared memory operation
+struct shm_mapping
+{
+    shm_handle handle;
+    void* ptr = nullptr;
+    std::size_t size = 0;
+    bool created = false; ///< true if newly created, false if opened existing
+};
+
+/// Create or open and map a shared memory segment for writing (POSIX
+/// implementation)
+///
+/// Tries to exclusively create the segment first. If it already exists,
+/// opens the existing segment with read-write access instead.
 ///
 /// @param name Name of the shared memory segment
-/// @param size Size of the shared memory segment in bytes
-/// @return A tuple of (handle, mapped pointer) or an error
-inline auto create_and_map_shm(const std::string& name, std::size_t size)
-    -> tl::expected<std::pair<shm_handle, void*>, std::error_code>
+/// @param size Size of the shared memory segment in bytes (used when creating)
+/// @return An shm_mapping or an error
+inline auto
+create_or_open_and_map_shm(const std::string& name, std::size_t size)
+    -> tl::expected<shm_mapping, std::error_code>
 {
-    // Create shared memory object
+    // Try to exclusively create the shared memory object
     int fd = shm_open(name.c_str(), O_CREAT | O_RDWR | O_EXCL, 0666);
-    if (fd == -1)
+    if (fd != -1)
     {
-        if (errno == EEXIST)
+        // Successfully created a new segment
+        if (ftruncate(fd, static_cast<off_t>(size)) == -1)
         {
-            return tl::make_unexpected(
-                make_error_code(ouroboros::error::shared_memory_exists));
+            close(fd);
+            shm_unlink(name.c_str());
+            return tl::make_unexpected(make_error_code(
+                ouroboros::error::shared_memory_truncate_failed));
         }
+
+        void* ptr =
+            mmap(nullptr, size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+        if (ptr == MAP_FAILED)
+        {
+            close(fd);
+            shm_unlink(name.c_str());
+            return tl::make_unexpected(
+                make_error_code(ouroboros::error::shared_memory_map_failed));
+        }
+
+        VERIFY(reinterpret_cast<uintptr_t>(ptr) % 8 == 0,
+               "Mapped shared memory is not 8-byte aligned");
+
+        shm_handle handle;
+        handle.fd = fd;
+        return shm_mapping{handle, ptr, size, true};
+    }
+
+    // Creation failed
+    if (errno != EEXIST)
+    {
         return tl::make_unexpected(
             make_error_code(ouroboros::error::shared_memory_create_failed));
     }
 
-    // Set the size of the shared memory object
-    if (ftruncate(fd, static_cast<off_t>(size)) == -1)
+    // Segment already exists - open it for read-write
+    fd = shm_open(name.c_str(), O_RDWR, 0666);
+    if (fd == -1)
     {
-        close(fd);
-        shm_unlink(name.c_str());
+        if (errno == ENOENT)
+        {
+            return tl::make_unexpected(
+                make_error_code(ouroboros::error::shared_memory_not_found));
+        }
         return tl::make_unexpected(
-            make_error_code(ouroboros::error::shared_memory_truncate_failed));
+            make_error_code(ouroboros::error::shared_memory_open_failed));
     }
 
-    // Map the shared memory object
-    void* ptr = mmap(nullptr, size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+    struct stat st;
+    if (fstat(fd, &st) == -1)
+    {
+        close(fd);
+        return tl::make_unexpected(
+            make_error_code(ouroboros::error::shared_memory_stat_failed));
+    }
+
+    const std::size_t existing_size = static_cast<std::size_t>(st.st_size);
+
+    void* ptr = mmap(nullptr, existing_size, PROT_READ | PROT_WRITE,
+                     MAP_SHARED, fd, 0);
     if (ptr == MAP_FAILED)
     {
         close(fd);
-        shm_unlink(name.c_str());
         return tl::make_unexpected(
             make_error_code(ouroboros::error::shared_memory_map_failed));
     }
 
-    // Verify alignment (buffer must be 8-byte aligned for writer)
     VERIFY(reinterpret_cast<uintptr_t>(ptr) % 8 == 0,
            "Mapped shared memory is not 8-byte aligned");
 
     shm_handle handle;
     handle.fd = fd;
-    return std::make_pair(handle, ptr);
+    return shm_mapping{handle, ptr, existing_size, false};
 }
 
 /// Open and map an existing shared memory segment for reading (POSIX
