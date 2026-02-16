@@ -3,6 +3,7 @@
 """Pure-Python implementation of Ouroboros shared-memory log reader."""
 
 import logging
+import mmap
 import os
 import struct
 import sys
@@ -233,6 +234,7 @@ class Reader:
 
         self._name = name
         self._shm: Optional[shared_memory.SharedMemory] = None
+        self._mmap: Optional[mmap.mmap] = None
         self._buffer: Optional[Union[bytes, memoryview]] = None
         self._chunk_count = 0
         self._current_chunk_index = 0
@@ -248,14 +250,23 @@ class Reader:
 
     def _attach(self) -> None:
         """Attach to the shared memory segment and validate the buffer."""
+        name = self._name
+        if os.name != "nt":
+            name = name.lstrip("/")
+
+        # We use SharedMemory for cross-platform support (on Windows, shared
+        # memory is not a file on disk). On Linux we could use mmap directly
+        # on /dev/shm, but SharedMemory keeps the code portable.
         try:
-            name = self._name
-            if os.name != "nt":
-                name = name.lstrip("/")
             self._shm = shared_memory.SharedMemory(name=name, create=False)
             # Use live buffer (memoryview), not a snapshot; bytes() would copy once
             # and we would never see entries written by the generator after attach.
             self._buffer = self._shm.buf
+        except PermissionError:
+            # Python's SharedMemory always opens with O_RDWR, which fails
+            # when the caller only has read permission. Since this is a
+            # reader, fall back to opening the segment read-only via mmap.
+            self._attach_read_only(name)
         except FileNotFoundError as e:
             error_msg = (
                 f"Shared memory segment {e.filename} not found when attaching Reader"
@@ -270,6 +281,47 @@ class Reader:
             )
             raise ReaderError(f"Failed to attach to shared memory: {e}")
 
+        self._configure()
+
+    def _attach_read_only(self, name: str) -> None:
+        """Attach to shared memory in read-only mode.
+
+        Python's SharedMemory always opens with O_RDWR, which fails when the
+        caller only has read permission on the segment. This method opens the
+        underlying /dev/shm file directly with O_RDONLY and mmaps it.
+        """
+        shm_path = f"/dev/shm/{name}"
+        log.debug(
+            "SharedMemory O_RDWR failed (PermissionError), "
+            "falling back to read-only open of '%s'",
+            shm_path,
+        )
+        try:
+            fd = os.open(shm_path, os.O_RDONLY)
+            try:
+                self._mmap = mmap.mmap(fd, 0, access=mmap.ACCESS_READ)
+            finally:
+                os.close(fd)
+            self._buffer = self._mmap
+        except FileNotFoundError:
+            error_msg = (
+                f"Shared memory segment '{self._name}' not found when "
+                "attaching Reader"
+            )
+            log.error(error_msg)
+            raise ReaderError(error_msg)
+        except Exception as e:
+            log.exception(
+                "Failed to attach Reader (read-only) to shared memory '%s': %s",
+                self._name,
+                e,
+            )
+            raise ReaderError(
+                f"Failed to open shared memory '{self._name}' read-only: {e}"
+            )
+
+    def _configure(self) -> None:
+        """Validate the buffer and initialize reading position."""
         if not self._is_ready():
             log.error(
                 "Buffer for shared memory '%s' has invalid magic header", self._name
@@ -663,8 +715,8 @@ class Reader:
         SharedMemory.close() may raise BufferError. Discard entries before closing
         for clean shutdown.
         """
+        log.debug("Closing Reader for shm '%s'", self._name)
         if self._shm is not None:
-            log.debug("Closing Reader for shm '%s'", self._name)
             try:
                 self._shm.close()
             except BufferError:
@@ -674,7 +726,10 @@ class Reader:
                     self._name,
                 )
             self._shm = None
-            self._buffer = None
+        if self._mmap is not None:
+            self._mmap.close()
+            self._mmap = None
+        self._buffer = None
 
     @property
     def buffer_id(self) -> int:
