@@ -94,10 +94,11 @@ public:
     /// @param should_unlink If true, unlink the shared memory segment on
     ///                      destruction (default: true)
     /// @return Error if configuration fails
-    auto configure(const std::string& shm_name, std::size_t chunk_target_size,
-                   std::size_t chunk_count, uint64_t buffer_id = 0,
-                   bool force_init = false, bool should_unlink = true)
-        -> tl::expected<void, configure_error>
+    auto
+    configure(const std::string& shm_name, std::size_t chunk_target_size,
+              std::size_t chunk_count, uint64_t buffer_id = 0,
+              bool force_init = false,
+              bool should_unlink = true) -> tl::expected<void, configure_error>
     {
         VERIFY(chunk_count > 0, "chunk_count must be greater than 0");
         VERIFY(!shm_name.empty(), "shm_name must not be empty");

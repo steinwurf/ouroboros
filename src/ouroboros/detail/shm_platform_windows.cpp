@@ -66,8 +66,8 @@ auto create_or_open_and_map_shm(const std::string& name, std::size_t size)
         {
             if (GetLastError() == ERROR_FILE_NOT_FOUND)
             {
-                return tl::make_unexpected(make_error_code(
-                    ouroboros::error::shared_memory_not_found));
+                return tl::make_unexpected(
+                    make_error_code(ouroboros::error::shared_memory_not_found));
             }
             return tl::make_unexpected(
                 make_error_code(ouroboros::error::shared_memory_open_failed));

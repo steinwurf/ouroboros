@@ -52,8 +52,8 @@ struct shm_mapping
 /// @param name Name of the shared memory segment
 /// @param size Size of the shared memory segment in bytes (used when creating)
 /// @return An shm_mapping or an error
-inline auto
-create_or_open_and_map_shm(const std::string& name, std::size_t size)
+inline auto create_or_open_and_map_shm(const std::string& name,
+                                       std::size_t size)
     -> tl::expected<shm_mapping, std::error_code>
 {
     // Try to exclusively create the shared memory object
@@ -117,8 +117,8 @@ create_or_open_and_map_shm(const std::string& name, std::size_t size)
 
     const std::size_t existing_size = static_cast<std::size_t>(st.st_size);
 
-    void* ptr = mmap(nullptr, existing_size, PROT_READ | PROT_WRITE,
-                     MAP_SHARED, fd, 0);
+    void* ptr =
+        mmap(nullptr, existing_size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
     if (ptr == MAP_FAILED)
     {
         close(fd);

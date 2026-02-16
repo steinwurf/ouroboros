@@ -31,8 +31,7 @@ ERROR_TAG(resume_chunk_count_mismatch,
           "Cannot resume: chunk count does not match.")
 ERROR_TAG(resume_buffer_size_mismatch,
           "Cannot resume: buffer size does not match expected size.")
-ERROR_TAG(resume_buffer_id_mismatch,
-          "Cannot resume: buffer ID does not match.")
+ERROR_TAG(resume_buffer_id_mismatch, "Cannot resume: buffer ID does not match.")
 ERROR_TAG(resume_writer_finished, "Cannot resume: writer has finished.")
 ERROR_TAG(resume_unexpected_wrap,
           "Cannot resume: unexpected wrap found in buffer.")
