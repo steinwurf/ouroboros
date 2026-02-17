@@ -195,6 +195,13 @@ TEST(test_shm, writer_finish_reader_unlinks_shm)
     EXPECT_EQ(subsequent.error(),
               ouroboros::make_error_code(ouroboros::error::writer_finished));
 
+    // Release the writer's handle on the shared memory.
+    // On POSIX, the reader's unlink_shm() already removed the name.
+    // On Windows, unlink_shm() is a no-op — the named mapping persists until
+    // all handles are closed. Resetting the writer closes its handle, allowing
+    // the kernel to destroy the mapping object.
+    writer = ouroboros::shm_log_writer{};
+
     // Shared memory should have been unlinked - new reader cannot attach
     ouroboros::shm_log_reader reader2;
     auto attach_result = reader2.configure(shm_name);
