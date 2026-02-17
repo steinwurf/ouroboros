@@ -3,6 +3,7 @@
 """Pure-Python implementation of Ouroboros shared-memory log reader."""
 
 import logging
+import mmap
 import os
 import struct
 import sys
@@ -17,8 +18,8 @@ log = logging.getLogger(__name__)
 
 # Buffer format constants (matching C++ buffer_format.hpp)
 MAGIC = 0x4F55524F424C4F47  # "OUROBLOG"
-VERSION = 1
-BUFFER_HEADER_SIZE = 16
+VERSION = 2
+BUFFER_HEADER_SIZE = 24
 CHUNK_ROW_SIZE = 16
 ENTRY_HEADER_SIZE = 4
 ENTRY_ALIGNMENT = 4
@@ -56,6 +57,18 @@ class BufferTooSmallError(ReaderError):
 
 class NoDataAvailableError(ReaderError):
     """Raised when no data is available to read."""
+
+    pass
+
+
+class BufferRestartedError(ReaderError):
+    """Raised when the buffer was restarted; reader must reconfigure."""
+
+    pass
+
+
+class ReservedEntryLengthError(ReaderError):
+    """Raised when a reserved entry length value is encountered."""
 
     pass
 
@@ -142,19 +155,27 @@ class Entry:
     entry is still valid (has not been overwritten) before using the data.
     """
 
-    __slots__ = ("_data", "_chunk_info", "_sequence_number", "_chunk_row_view")
+    __slots__ = (
+        "_data",
+        "_chunk_info",
+        "_sequence_number",
+        "_buffer_view",
+        "_buffer_id",
+    )
 
     def __init__(
         self,
         data: bytes,
         chunk_info: ChunkInfo,
         sequence_number: int,
-        chunk_row_view: memoryview,
+        buffer_view: memoryview,
+        buffer_id: int,
     ) -> None:
         self._data = data
         self._chunk_info = chunk_info
         self._sequence_number = sequence_number
-        self._chunk_row_view = chunk_row_view
+        self._buffer_view = buffer_view
+        self._buffer_id = buffer_id
 
     @property
     def data(self) -> bytes:
@@ -174,13 +195,19 @@ class Entry:
     def is_valid(self) -> bool:
         """Check if the entry is still valid (chunk has not been overwritten).
 
-        Re-reads the chunk token from the buffer (via the stored chunk row view)
-        and compares with the token at read time. If they match, the entry was
-        not overwritten. Returns False if the buffer is no longer available
+        Re-reads the buffer ID and chunk token from the buffer and compares
+        with the values at read time. If both match, the entry was not
+        overwritten. Returns False if the buffer is no longer available
         (e.g. reader was closed).
         """
         try:
-            current_token = _load_acquire_u64(self._chunk_row_view, 8)
+            current_id = _load_acquire_u64(self._buffer_view, 16)
+            if current_id != self._buffer_id:
+                return False
+            chunk_row_offset = (
+                BUFFER_HEADER_SIZE + self._chunk_info.index * CHUNK_ROW_SIZE
+            )
+            current_token = _load_acquire_u64(self._buffer_view, chunk_row_offset + 8)
             return self._chunk_info.token == current_token
         except (ValueError, TypeError):
             # Buffer was released (reader closed) or similar
@@ -207,6 +234,7 @@ class Reader:
 
         self._name = name
         self._shm: Optional[shared_memory.SharedMemory] = None
+        self._mmap: Optional[mmap.mmap] = None
         self._buffer: Optional[Union[bytes, memoryview]] = None
         self._chunk_count = 0
         self._current_chunk_index = 0
@@ -214,20 +242,31 @@ class Reader:
         self._offset = 0
         self._total_entries_read = 0
         self._entries_read_in_current_chunk = 0
+        self._writer_finished = False
+        self._buffer_id = 0
 
         log.debug("Creating Reader for shared memory '%s'", self._name)
         self._attach()
 
     def _attach(self) -> None:
         """Attach to the shared memory segment and validate the buffer."""
+        name = self._name
+        if os.name != "nt":
+            name = name.lstrip("/")
+
+        # We use SharedMemory for cross-platform support (on Windows, shared
+        # memory is not a file on disk). On Linux we could use mmap directly
+        # on /dev/shm, but SharedMemory keeps the code portable.
         try:
-            name = self._name
-            if os.name != "nt":
-                name = name.lstrip("/")
             self._shm = shared_memory.SharedMemory(name=name, create=False)
             # Use live buffer (memoryview), not a snapshot; bytes() would copy once
             # and we would never see entries written by the generator after attach.
             self._buffer = self._shm.buf
+        except PermissionError:
+            # Python's SharedMemory always opens with O_RDWR, which fails
+            # when the caller only has read permission. Since this is a
+            # reader, fall back to opening the segment read-only via mmap.
+            self._attach_read_only(name)
         except FileNotFoundError as e:
             error_msg = (
                 f"Shared memory segment {e.filename} not found when attaching Reader"
@@ -242,6 +281,47 @@ class Reader:
             )
             raise ReaderError(f"Failed to attach to shared memory: {e}")
 
+        self._configure()
+
+    def _attach_read_only(self, name: str) -> None:
+        """Attach to shared memory in read-only mode.
+
+        Python's SharedMemory always opens with O_RDWR, which fails when the
+        caller only has read permission on the segment. This method opens the
+        underlying /dev/shm file directly with O_RDONLY and mmaps it.
+        """
+        shm_path = f"/dev/shm/{name}"
+        log.debug(
+            "SharedMemory O_RDWR failed (PermissionError), "
+            "falling back to read-only open of '%s'",
+            shm_path,
+        )
+        try:
+            fd = os.open(shm_path, os.O_RDONLY)
+            try:
+                self._mmap = mmap.mmap(fd, 0, access=mmap.ACCESS_READ)
+            finally:
+                os.close(fd)
+            self._buffer = self._mmap
+        except FileNotFoundError:
+            error_msg = (
+                f"Shared memory segment '{self._name}' not found when "
+                "attaching Reader"
+            )
+            log.error(error_msg)
+            raise ReaderError(error_msg)
+        except Exception as e:
+            log.exception(
+                "Failed to attach Reader (read-only) to shared memory '%s': %s",
+                self._name,
+                e,
+            )
+            raise ReaderError(
+                f"Failed to open shared memory '{self._name}' read-only: {e}"
+            )
+
+    def _configure(self) -> None:
+        """Validate the buffer and initialize reading position."""
         if not self._is_ready():
             log.error(
                 "Buffer for shared memory '%s' has invalid magic header", self._name
@@ -255,8 +335,10 @@ class Reader:
                 f"Unsupported buffer version: {version} (expected {VERSION})"
             )
 
-        # Read chunk count
+        # Read chunk count and buffer ID (ID uses atomic load for restart
+        # detection)
         self._chunk_count = _load_acquire_u32(self._buffer, 12)
+        self._buffer_id = _load_acquire_u64(self._buffer, 16)
         if self._chunk_count == 0:
             raise InvalidChunkCountError("Chunk count is zero")
 
@@ -394,14 +476,27 @@ class Reader:
         """Read the next entry from the log, returning None if no data available.
 
         Returns:
-            Entry with data and chunk info, or None if no entry is available.
+            Entry with data and chunk info, or None if no entry is available
+            (including when the writer has finished). Check :attr:`writer_finished`
+            after getting None to distinguish "no data yet" from "writer done".
         """
         if self._buffer is None:
             raise ReaderError("Reader not attached to buffer")
 
+        if self._writer_finished:
+            return None
+
         # Retry loop: wrap / stale chunk / uncommitted entry all resolve by
         # either jumping and retrying, or returning None.
         while True:
+            # Check if buffer was restarted (ID changed); reader must
+            # reconfigure
+            current_id = _load_acquire_u64(self._buffer, 16)
+            if current_id != self._buffer_id:
+                raise BufferRestartedError(
+                    "Buffer was restarted; reader must reconfigure"
+                )
+
             # Implicit wrap: no room for header
             if self._offset + ENTRY_HEADER_SIZE > len(self._buffer):
                 log.debug(
@@ -451,15 +546,14 @@ class Reader:
             # Clear the commit flag and get the length
             length = _clear_commit(length_with_flag, bits=32)
 
-            # Check if the entry length is valid
+            # Handle special length values and normal entries
             if length == 0:
                 log.debug(
                     "read_next_entry: offset=%d length=0 (not written yet)",
                     self._offset,
                 )
                 return None
-
-            if length == 1:
+            elif length == 1:
                 log.debug(
                     "read_next_entry: offset=%d length=1 (writer wrap), jump chunk 0",
                     self._offset,
@@ -468,9 +562,24 @@ class Reader:
                     log.debug("read_next_entry: jump_to_chunk(0) failed, None")
                     return None
                 continue
-
-            # Validate length
-            if length < ENTRY_HEADER_SIZE:
+            elif length == 2:
+                log.debug(
+                    "read_next_entry: offset=%d length=2 (reserved)",
+                    self._offset,
+                )
+                raise ReservedEntryLengthError(
+                    "Reserved entry length value encountered"
+                )
+            elif length == 3:
+                log.debug(
+                    "read_next_entry: offset=%d length=3 (writer finished)",
+                    self._offset,
+                )
+                self._offset += ENTRY_HEADER_SIZE
+                self._offset = _align_up(self._offset, ENTRY_ALIGNMENT)
+                self._writer_finished = True
+                return None
+            elif length < ENTRY_HEADER_SIZE:
                 raise ReaderError(
                     f"Entry length {length} smaller than header size {ENTRY_HEADER_SIZE}"
                 )
@@ -515,15 +624,12 @@ class Reader:
                 offset=self._get_chunk_offset(self._current_chunk_index),
                 is_committed=True,
             )
-            chunk_row_offset = self._chunk_row_offset(self._current_chunk_index)
-            chunk_row_view = memoryview(self._buffer)[
-                chunk_row_offset : chunk_row_offset + CHUNK_ROW_SIZE
-            ]
             entry = Entry(
                 data=payload,
                 chunk_info=chunk_info,
                 sequence_number=sequence_number,
-                chunk_row_view=chunk_row_view,
+                buffer_view=memoryview(self._buffer),
+                buffer_id=self._buffer_id,
             )
 
             log.debug(
@@ -541,7 +647,8 @@ class Reader:
         """Read the next available entry as a string, if any.
 
         Returns one payload decoded as UTF-8 or None when no data is available
-        yet (or when all data has been read), or when the entry was overwritten.
+        yet (or when the writer has finished), or when the entry was overwritten.
+        Check :attr:`writer_finished` after getting None to distinguish cases.
 
         Returns:
             Payload decoded as UTF-8 string, or None if no entry is available.
@@ -557,11 +664,12 @@ class Reader:
     def read_all(self) -> List[Entry]:
         """Read all available entries from the log.
 
+        Stops when no more data is available (including when the writer has
+        finished). Check :attr:`writer_finished` after the call to see if the
+        writer explicitly finished.
+
         Returns:
             List of Entry objects for all entries in order
-
-        Raises:
-            ReaderError: If reading fails
         """
         log.debug("read_all() called on Reader for shm '%s'", self._name)
         entries: List[Entry] = []
@@ -579,6 +687,9 @@ class Reader:
 
     def __iter__(self) -> Iterator[Entry]:
         """Iterate over all available entries.
+
+        Stops when no more data is available. Check :attr:`writer_finished`
+        after the loop to see if the writer explicitly finished.
 
         Yields:
             Entry for each log entry in order
@@ -604,8 +715,8 @@ class Reader:
         SharedMemory.close() may raise BufferError. Discard entries before closing
         for clean shutdown.
         """
+        log.debug("Closing Reader for shm '%s'", self._name)
         if self._shm is not None:
-            log.debug("Closing Reader for shm '%s'", self._name)
             try:
                 self._shm.close()
             except BufferError:
@@ -615,7 +726,25 @@ class Reader:
                     self._name,
                 )
             self._shm = None
-            self._buffer = None
+        if self._mmap is not None:
+            self._mmap.close()
+            self._mmap = None
+        self._buffer = None
+
+    @property
+    def buffer_id(self) -> int:
+        """Get the 64-bit buffer ID from the header."""
+        return self._buffer_id
+
+    @property
+    def writer_finished(self) -> bool:
+        """True if the writer has finished; no more data will be written.
+
+        After :meth:`read_next_entry` or :meth:`read_next` returns None, check
+        this to distinguish "no data yet" (poll again) from "writer done"
+        (stop reading, optionally unlink shared memory).
+        """
+        return self._writer_finished
 
     @property
     def total_entries_read(self) -> int:

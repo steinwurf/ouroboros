@@ -6,11 +6,8 @@
 #include <tl/expected.hpp>
 #include <verify/verify.hpp>
 
-#include <cassert>
-#include <climits>
 #include <cstdint>
 #include <cstring>
-#include <optional>
 #include <string_view>
 
 #include "detail/atomic.hpp"
@@ -50,30 +47,24 @@ public:
     struct chunk_info
     {
         constexpr chunk_info() noexcept :
-            m_token(0), m_offset(0), m_is_committed(false), m_index(0)
+            m_token(0), m_offset(0), m_index(0), m_is_committed(false)
         {
         }
 
         constexpr chunk_info(std::size_t index, uint64_t token,
                              uint64_t offset_and_commit_flag) noexcept :
-            m_token(token), m_is_committed(detail::buffer_format::is_committed(
-                                offset_and_commit_flag)),
+            m_token(token),
             m_offset(detail::buffer_format::is_committed(offset_and_commit_flag)
                          ? detail::buffer_format::clear_commit(
                                offset_and_commit_flag)
                          : 0),
-            m_index(index)
+            m_index(index), m_is_committed(detail::buffer_format::is_committed(
+                                offset_and_commit_flag))
         {
         }
 
-        constexpr chunk_info& operator=(const chunk_info& other)
-        {
-            m_token = other.m_token;
-            m_offset = other.m_offset;
-            m_is_committed = other.m_is_committed;
-            m_index = other.m_index;
-            return *this;
-        }
+        constexpr chunk_info&
+        operator=(const chunk_info& other) noexcept = default;
 
         constexpr bool is_committed() const
         {
@@ -104,24 +95,71 @@ public:
         bool m_is_committed;
     };
 
+    /// Represents a log entry read from the circular buffer.
+    ///
+    /// IMPORTANT: Validity Contract
+    /// ----------------------------
+    /// The `data` member is a std::string_view pointing directly into shared
+    /// memory. This zero-copy design is efficient but requires careful
+    /// handling:
+    ///
+    /// 1. The entry may be invalidated at any time by the writer overwriting
+    ///    the underlying memory.
+    /// 2. You MUST first copy or process the data, THEN call is_valid() to
+    ///    verify the data wasn't overwritten during your operation.
+    /// 3. Only trust the copied/processed result if is_valid() returns true.
+    /// 4. Do NOT store the string_view for later use - it may become invalid.
+    ///
+    /// The validation MUST happen AFTER working with the data because the
+    /// writer could overwrite the memory at any moment. By checking validity
+    /// after copying, you ensure the copy completed before any overwrite.
+    ///
+    /// Example usage:
+    /// @code
+    ///   auto result = reader.read_next_entry();
+    ///   if (result) {
+    ///       std::string copy(result->data);  // Copy first
+    ///       if (result->is_valid()) {        // Then validate
+    ///           // Safe to use copy - data wasn't overwritten during copy
+    ///       }
+    ///   }
+    /// @endcode
+    ///
+    /// Alternatively, use read_next() which returns a std::string copy and
+    /// handles the validity check internally.
     struct entry
     {
-        entry(std::string_view data, std::span<const uint8_t> chunk_row,
-              uint64_t chunk_token, uint64_t sequence_number) :
-            data(data), chunk_row(chunk_row), chunk_token(chunk_token),
-            sequence_number(sequence_number)
+        entry(std::string_view data, std::span<const uint8_t> buffer,
+              std::size_t chunk_index, uint64_t chunk_token,
+              uint64_t sequence_number, uint64_t buffer_id) :
+            data(data), buffer(buffer), chunk_index(chunk_index),
+            chunk_token(chunk_token), sequence_number(sequence_number),
+            buffer_id(buffer_id)
         {
         }
 
         const std::string_view data;
-        const std::span<const uint8_t> chunk_row;
+        const std::span<const uint8_t> buffer;
+        const std::size_t chunk_index;
         const uint64_t chunk_token;
         const uint64_t sequence_number;
+        const uint64_t buffer_id;
 
+        /// Check if the entry data is still valid.
+        /// @return true if the chunk token and buffer ID haven't changed
+        ///         since reading, meaning the data is safe to use.
         bool is_valid() const
         {
-            const uint64_t current_token = detail::atomic::load_acquire(
-                detail::buffer_format::chunk_token(chunk_row));
+            const uint64_t current_id =
+                detail::atomic::load_acquire(reinterpret_cast<const uint64_t*>(
+                    buffer.data() + detail::buffer_format::buffer_id_offset));
+            if (current_id != buffer_id)
+            {
+                return false;
+            }
+            const uint64_t current_token =
+                detail::atomic::load_acquire(detail::buffer_format::chunk_token(
+                    detail::buffer_format::chunk_row(buffer, chunk_index)));
             return chunk_token == current_token;
         }
     };
@@ -130,8 +168,7 @@ public:
 
     static auto is_ready(std::span<const uint8_t> buffer) -> bool
     {
-        VERIFY(buffer.size() >= detail::buffer_format::buffer_header_size);
-        if (buffer.size() < 8)
+        if (buffer.size() < detail::buffer_format::buffer_header_size)
         {
             return false;
         }
@@ -148,23 +185,24 @@ public:
                    read_strategy strategy = read_strategy::auto_detect)
         -> tl::expected<void, std::error_code>
     {
-        VERIFY(buffer.size() >= detail::buffer_format::buffer_header_size,
-               "Buffer too small for header");
-
         if (!is_ready(buffer))
         {
             return tl::make_unexpected(
                 make_error_code(ouroboros::error::invalid_magic));
         }
 
-        const uint32_t version = read_value<uint32_t>(buffer.data() + 8);
+        const uint32_t version =
+            detail::buffer_format::read_value<uint32_t>(buffer.data() + 8);
         if (version != detail::buffer_format::version)
         {
             return tl::make_unexpected(
                 make_error_code(ouroboros::error::unsupported_version));
         }
         const std::size_t chunk_count =
-            read_value<uint32_t>(buffer.data() + 12);
+            detail::buffer_format::read_value<uint32_t>(buffer.data() + 12);
+        const uint64_t buffer_id =
+            detail::atomic::load_acquire(reinterpret_cast<const uint64_t*>(
+                buffer.data() + detail::buffer_format::buffer_id_offset));
 
         if (chunk_count == 0)
         {
@@ -190,7 +228,13 @@ public:
 
         m_buffer = buffer;
         m_chunk_count = chunk_count;
+        m_buffer_id = buffer_id;
         m_total_entries_read = 0;
+        m_writer_finished = false;
+        // Reset current chunk state before setting new chunk
+        // This ensures reconfigure works correctly even if the new chunk has
+        // the same token as the previous configuration
+        m_current_chunk = chunk_info{};
         set_current_chunk(start);
 
         return {};
@@ -203,10 +247,28 @@ public:
         VERIFY(m_offset % detail::buffer_format::entry_alignment == 0,
                "Offset not aligned", m_offset,
                detail::buffer_format::entry_alignment);
+
+        if (m_writer_finished)
+        {
+            return tl::make_unexpected(
+                make_error_code(ouroboros::error::writer_finished));
+        }
+
         // Retry loop: wrap / stale chunk / uncommitted entry all resolve by
         // either jumping and retrying, or returning no_data().
         for (;;)
         {
+            // Check if buffer was restarted (ID changed); reader must
+            // reconfigure
+            const uint64_t current_id =
+                detail::atomic::load_acquire(reinterpret_cast<const uint64_t*>(
+                    m_buffer.data() + detail::buffer_format::buffer_id_offset));
+            if (current_id != m_buffer_id)
+            {
+                return tl::make_unexpected(
+                    make_error_code(ouroboros::error::buffer_restarted));
+            }
+
             VERIFY(m_offset % detail::buffer_format::entry_alignment == 0,
                    "Offset not aligned", m_offset,
                    detail::buffer_format::entry_alignment);
@@ -240,7 +302,7 @@ public:
                     // Check that the next chunk is newer than the current.
                     if (next_chunk_info.token() <= m_current_chunk.token())
                     {
-                        // It wasn't which means that the must wait for the next
+                        // It wasn't which means that we must wait for the next
                         // chunk to be (re)written.
                         return tl::make_unexpected(make_error_code(
                             ouroboros::error::no_data_available));
@@ -305,7 +367,7 @@ public:
             const std::size_t length =
                 detail::buffer_format::clear_commit(length_with_flag);
 
-            // Check the entry length
+            // Handle special length values and normal entries
             if (length == 0)
             {
                 // The entry length is 0 which means this entry is not yet
@@ -313,8 +375,7 @@ public:
                 return tl::make_unexpected(
                     make_error_code(ouroboros::error::no_data_available));
             }
-
-            if (length == 1)
+            else if (length == 1)
             {
                 // The entry length is 1 which means the writer has wrapped the
                 // buffer. We need to jump to the first chunk and retry the
@@ -329,41 +390,59 @@ public:
 
                 continue;
             }
+            else if (length == 2)
+            {
+                // The entry length is 2 which is reserved for future use.
+                // This should not occur in normal operation.
+                return tl::make_unexpected(
+                    make_error_code(ouroboros::error::reserved_entry_length));
+            }
+            else if (length == 3)
+            {
+                // The entry length is 3 which means the writer has finished.
+                // Advance past the entry header and mark as finished.
+                m_offset += detail::buffer_format::entry_header_size;
+                m_offset = detail::buffer_format::align_up(
+                    m_offset, detail::buffer_format::entry_alignment);
+                m_writer_finished = true;
+                return tl::make_unexpected(
+                    make_error_code(ouroboros::error::writer_finished));
+            }
+            else
+            {
+                // Normal entry (length >= 4)
+                VERIFY(length >= detail::buffer_format::entry_header_size,
+                       "Entry length smaller than header size", length,
+                       detail::buffer_format::entry_header_size);
+                // Check that the entry fits in the buffer.
+                VERIFY(m_offset + length <= m_buffer.size(),
+                       "Entry exceeds buffer bounds", m_offset, length,
+                       m_buffer.size());
 
-            // Check if the entry length is valid.
-            // We already check the 0 and 1 cases above. So we can assume that
-            // the length is greater than the header size.
-            VERIFY(length >= detail::buffer_format::entry_header_size,
-                   "Entry length smaller than header size", length,
-                   detail::buffer_format::entry_header_size);
-            // Check that the entry fits in the buffer.
-            VERIFY(m_offset + length <= m_buffer.size(),
-                   "Entry exceeds buffer bounds", m_offset, length,
-                   m_buffer.size());
+                // Extract payload
+                const std::size_t payload_size =
+                    length - detail::buffer_format::entry_header_size;
+                const char* payload_data = reinterpret_cast<const char*>(
+                    m_buffer.data() + m_offset +
+                    detail::buffer_format::entry_header_size);
+                std::string_view payload_view(payload_data, payload_size);
 
-            // Extract payload
-            const std::size_t payload_size =
-                length - detail::buffer_format::entry_header_size;
-            const char* payload_data = reinterpret_cast<const char*>(
-                m_buffer.data() + m_offset +
-                detail::buffer_format::entry_header_size);
-            std::string_view payload_view(payload_data, payload_size);
+                // Advance
+                m_offset += length;
+                m_offset = detail::buffer_format::align_up(
+                    m_offset, detail::buffer_format::entry_alignment);
+                m_total_entries_read += 1;
+                m_entries_read_in_current_chunk += 1;
 
-            // Advance
-            m_offset += length;
-            m_offset = detail::buffer_format::align_up(
-                m_offset, detail::buffer_format::entry_alignment);
-            m_total_entries_read += 1;
-            m_entries_read_in_current_chunk += 1;
-
-            // Calculate sequence number: chunk_token is the number of entries
-            // written before this chunk, so we add the entries read in this
-            // chunk
-            const uint64_t sequence_number =
-                m_current_chunk.token() + m_entries_read_in_current_chunk;
-            return entry(payload_view,
-                         chunk_row(m_buffer, m_current_chunk.index()),
-                         m_current_chunk.token(), sequence_number);
+                // Calculate sequence number: chunk_token is the number of
+                // entries written before this chunk, so we add the entries read
+                // in this chunk
+                const uint64_t sequence_number =
+                    m_current_chunk.token() + m_entries_read_in_current_chunk;
+                return entry(payload_view, m_buffer, m_current_chunk.index(),
+                             m_current_chunk.token(), sequence_number,
+                             m_buffer_id);
+            }
         }
     }
 
@@ -387,6 +466,13 @@ public:
     auto chunk_count() const -> std::size_t
     {
         return m_chunk_count;
+    }
+
+    /// Get the buffer ID from the header.
+    /// @return The 64-bit buffer ID configured by the writer
+    auto buffer_id() const -> uint64_t
+    {
+        return m_buffer_id;
     }
 
     auto total_entries_read() const -> std::size_t
@@ -428,31 +514,15 @@ private:
         m_entries_read_in_current_chunk = 0;
     }
 
-    template <typename T>
-    static T read_value(const uint8_t* buffer)
-    {
-        T value;
-        std::memcpy(&value, buffer, sizeof(value));
-        return value;
-    }
-
     static auto get_chunk_info(std::span<const uint8_t> buffer,
                                std::size_t chunk_index) -> chunk_info
     {
-        const auto& row = chunk_row(buffer, chunk_index);
+        const auto row = detail::buffer_format::chunk_row(buffer, chunk_index);
         return chunk_info(chunk_index,
                           detail::atomic::load_acquire(
                               detail::buffer_format::chunk_token(row)),
                           detail::atomic::load_acquire(
                               detail::buffer_format::chunk_offset(row)));
-    }
-
-    static auto chunk_row(std::span<const uint8_t> buffer,
-                          std::size_t chunk_index) -> std::span<const uint8_t>
-    {
-        return buffer.subspan(
-            detail::buffer_format::chunk_row_offset(chunk_index),
-            detail::buffer_format::chunk_row_size);
     }
 
     static auto find_chunk(std::span<const uint8_t> buffer,
@@ -535,9 +605,11 @@ private:
 
 private:
     std::size_t m_chunk_count = 0;
+    uint64_t m_buffer_id = 0;
     std::span<const uint8_t> m_buffer;
 
     chunk_info m_current_chunk;
+    bool m_writer_finished = false;
     std::size_t m_offset = 0;
     std::size_t m_total_entries_read = 0;
     std::size_t m_entries_read_in_current_chunk = 0;

@@ -32,11 +32,16 @@ func readValueU32(b []byte, offset uint64) uint32 {
 	return binary.LittleEndian.Uint32(b[offset:])
 }
 
+// readValueU64 reads a uint64 with plain memcpy (matching C++ read_value).
+func readValueU64(b []byte, offset uint64) uint64 {
+	return binary.LittleEndian.Uint64(b[offset:])
+}
+
 // Buffer format constants (matching C++ buffer_format.hpp)
 const (
 	Magic            = 0x4F55524F424C4F47 // "OUROBLOG"
-	Version          = 1
-	BufferHeaderSize = 16
+	Version          = 2
+	BufferHeaderSize = 24
 	ChunkRowSize     = 16
 	EntryHeaderSize  = 4
 	EntryAlignment   = 4
@@ -44,12 +49,15 @@ const (
 
 // Reader errors
 var (
-	ErrInvalidMagic       = errors.New("buffer magic value does not match")
-	ErrUnsupportedVersion = errors.New("unsupported buffer version")
-	ErrInvalidChunkCount  = errors.New("chunk count is zero")
-	ErrBufferTooSmall     = errors.New("buffer too small")
-	ErrNoDataAvailable    = errors.New("no data available in buffer")
-	ErrReaderNotAttached  = errors.New("reader not attached to buffer")
+	ErrInvalidMagic        = errors.New("buffer magic value does not match")
+	ErrUnsupportedVersion  = errors.New("unsupported buffer version")
+	ErrInvalidChunkCount   = errors.New("chunk count is zero")
+	ErrBufferTooSmall      = errors.New("buffer too small")
+	ErrNoDataAvailable     = errors.New("no data available in buffer")
+	ErrWriterFinished      = errors.New("writer has finished; no more data will be written")
+	ErrBufferRestarted     = errors.New("buffer was restarted; reader must reconfigure")
+	ErrReaderNotAttached   = errors.New("reader not attached to buffer")
+	ErrReservedEntryLength = errors.New("reserved entry length value encountered")
 )
 
 // ChunkInfo holds information about a chunk in the buffer.
@@ -66,16 +74,23 @@ type Entry struct {
 	Data           []byte
 	ChunkInfo      ChunkInfo
 	SequenceNumber uint64
-	chunkRowView   []byte // live view into buffer for IsValid; invalid after Reader.Close
+	buffer         []byte // live view into full buffer for IsValid; invalid after Reader.Close
+	bufferID       uint64 // buffer ID at the time the entry was read
 }
 
-// IsValid checks if the entry is still valid (chunk has not been overwritten).
+// IsValid checks if the entry is still valid (chunk has not been overwritten
+// and buffer has not been restarted).
 // Must not be called after Reader.Close().
 func (e *Entry) IsValid() bool {
-	if e.chunkRowView == nil || len(e.chunkRowView) < 16 {
+	if e.buffer == nil || len(e.buffer) < int(BufferHeaderSize) {
 		return false
 	}
-	currentToken := loadAcquireU64(e.chunkRowView, 8)
+	currentID := loadAcquireU64(e.buffer, 16)
+	if currentID != e.bufferID {
+		return false
+	}
+	row := chunkRow(e.buffer, e.ChunkInfo.Index)
+	currentToken := loadAcquireU64(row, 8)
 	return e.ChunkInfo.Token == currentToken
 }
 
@@ -85,10 +100,12 @@ type Reader struct {
 	file               *os.File
 	buffer             []byte
 	chunkCount         uint32
+	bufferID           uint64
 	currentChunk       ChunkInfo // cached; use for offset/token/index
 	offset             uint64    // current read position
 	totalEntriesRead   uint64
 	entriesReadInChunk uint64
+	writerFinished     bool
 }
 
 // NewReader creates a reader for the given shared memory name.
@@ -142,6 +159,7 @@ func (r *Reader) attach() error {
 	}
 
 	r.chunkCount = readValueU32(r.buffer, 12)
+	r.bufferID = loadAcquireU64(r.buffer, 16)
 	if r.chunkCount == 0 {
 		r.close()
 		return ErrInvalidChunkCount
@@ -268,17 +286,29 @@ func (r *Reader) jumpToChunk(chunkIndex int) bool {
 	return true
 }
 
-// ReadNextEntry reads the next entry from the log. Returns nil if no data available.
-func (r *Reader) ReadNextEntry() *Entry {
+// ReadNextEntry reads the next entry from the log.
+// Returns (nil, nil) if no data available.
+// Returns (nil, ErrWriterFinished) when the writer has finished.
+func (r *Reader) ReadNextEntry() (*Entry, error) {
 	if r.buffer == nil {
 		panic(ErrReaderNotAttached)
 	}
 
+	if r.writerFinished {
+		return nil, ErrWriterFinished
+	}
+
 	for {
+		// Check if buffer was restarted (ID changed); reader must reconfigure
+		currentID := loadAcquireU64(r.buffer, 16)
+		if currentID != r.bufferID {
+			return nil, ErrBufferRestarted
+		}
+
 		// Implicit wrap: no room for header
 		if r.offset+EntryHeaderSize > uint64(len(r.buffer)) {
 			if !r.jumpToChunk(0) {
-				return nil
+				return nil, nil
 			}
 			continue
 		}
@@ -289,7 +319,7 @@ func (r *Reader) ReadNextEntry() *Entry {
 			nextInfo := getChunkInfo(r.buffer, nextIndex)
 			if nextInfo.IsCommitted && r.offset == nextInfo.Offset {
 				if nextInfo.Token <= r.currentChunk.Token {
-					return nil
+					return nil, nil
 				}
 				r.setCurrentChunk(nextInfo)
 				continue
@@ -304,33 +334,38 @@ func (r *Reader) ReadNextEntry() *Entry {
 		if !info.IsCommitted || info.Token != r.currentChunk.Token {
 			latest := r.findChunkWithHighestToken()
 			if !latest.IsCommitted {
-				return nil
+				return nil, nil
 			}
 			if latest.Token <= r.currentChunk.Token {
-				return nil
+				return nil, nil
 			}
 			r.setCurrentChunk(latest)
 			continue
 		}
 
 		if !isCommitted32(lengthWithFlag) {
-			return nil
+			return nil, nil
 		}
 
 		length := uint64(clearCommit32(lengthWithFlag))
 
+		// Handle special length values and normal entries
 		if length == 0 {
-			return nil
-		}
-
-		if length == 1 {
+			return nil, nil
+		} else if length == 1 {
 			if !r.jumpToChunk(0) {
-				return nil
+				return nil, nil
 			}
 			continue
-		}
-
-		if length < EntryHeaderSize {
+		} else if length == 2 {
+			// Reserved for future use
+			return nil, ErrReservedEntryLength
+		} else if length == 3 {
+			r.offset += EntryHeaderSize
+			r.offset = alignUp(r.offset, EntryAlignment)
+			r.writerFinished = true
+			return nil, ErrWriterFinished
+		} else if length < EntryHeaderSize {
 			panic("entry length smaller than header size")
 		}
 
@@ -349,45 +384,59 @@ func (r *Reader) ReadNextEntry() *Entry {
 		r.entriesReadInChunk++
 
 		seqNum := r.currentChunk.Token + r.entriesReadInChunk
-		chunkRowView := chunkRow(r.buffer, r.currentChunk.Index)
 
 		return &Entry{
 			Data:           payload,
 			ChunkInfo:      r.currentChunk,
 			SequenceNumber: seqNum,
-			chunkRowView:   chunkRowView,
-		}
+			buffer:         r.buffer,
+			bufferID:       r.bufferID,
+		}, nil
 	}
 }
 
-// ReadNext reads the next entry as a string (UTF-8). Returns empty string if none.
-func (r *Reader) ReadNext() string {
-	entry := r.ReadNextEntry()
+// ReadNext reads the next entry as a string (UTF-8).
+// Returns ("", nil) if no data available.
+// Returns ("", ErrWriterFinished) when the writer has finished.
+func (r *Reader) ReadNext() (string, error) {
+	entry, err := r.ReadNextEntry()
+	if err != nil {
+		return "", err
+	}
 	if entry == nil {
-		return ""
+		return "", nil
 	}
 	if !entry.IsValid() {
-		return ""
+		return "", nil
 	}
-	return string(entry.Data)
+	return string(entry.Data), nil
 }
 
 // ReadAll reads all available entries.
-func (r *Reader) ReadAll() []*Entry {
+// Returns ErrWriterFinished if the writer finishes before all entries are read.
+func (r *Reader) ReadAll() ([]*Entry, error) {
 	var entries []*Entry
 	for {
-		entry := r.ReadNextEntry()
+		entry, err := r.ReadNextEntry()
+		if err != nil {
+			return entries, err
+		}
 		if entry == nil {
 			break
 		}
 		entries = append(entries, entry)
 	}
-	return entries
+	return entries, nil
 }
 
 // TotalEntriesRead returns the total number of entries read.
 func (r *Reader) TotalEntriesRead() uint64 {
 	return r.totalEntriesRead
+}
+
+// BufferID returns the 64-bit buffer ID from the header.
+func (r *Reader) BufferID() uint64 {
+	return r.bufferID
 }
 
 // ChunkCount returns the number of chunks.

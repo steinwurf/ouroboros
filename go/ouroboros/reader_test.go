@@ -142,7 +142,10 @@ func runGeneratorAndReader(t *testing.T, shmName string, recordCount, bufferSize
 	var payloads [][]byte
 	deadline := time.Now().Add(30 * time.Second)
 	for len(payloads) < recordCount && time.Now().Before(deadline) {
-		entry := reader.ReadNextEntry()
+		entry, err := reader.ReadNextEntry()
+		if err != nil {
+			break
+		}
 		if entry != nil {
 			payloads = append(payloads, entry.Data)
 		} else {
@@ -236,7 +239,10 @@ func TestEntryAndChunkInfo(t *testing.T) {
 	var entries []*Entry
 	deadline := time.Now().Add(30 * time.Second)
 	for len(entries) < 5 && time.Now().Before(deadline) {
-		entry := reader.ReadNextEntry()
+		entry, err := reader.ReadNextEntry()
+		if err != nil {
+			break
+		}
 		if entry != nil {
 			entries = append(entries, entry)
 		} else {

@@ -6,275 +6,69 @@
 
 #include <ouroboros/error_code.hpp>
 
-#include <atomic>
-#include <chrono>
 #include <cstring>
 #include <gtest/gtest.h>
 #include <map>
-#include <mutex>
-#include <set>
 #include <string>
-#include <thread>
 #include <vector>
 
-namespace
-{
+#include "test_helpers.hpp"
 
-// Helper to create aligned buffer
-// std::vector typically provides 8-byte aligned memory on most platforms
-auto create_aligned_buffer(std::size_t size) -> std::vector<uint8_t>
-{
-    std::vector<uint8_t> buffer(size);
-    // Verify alignment - most allocators provide 8-byte aligned memory
-    // If this fails, the writer's VERIFY will catch it during configure()
-    return buffer;
-}
-}
+using test_helpers::create_aligned_buffer;
 
-TEST(test_reader_writer, size_calculations)
-{
-    constexpr std::size_t chunk_row_size = 16;
-    constexpr std::size_t buffer_header_size = 16;
-
-    /// Test cases: chunk_target_size, chunk_count, expected_size
-    std::vector<std::tuple<std::size_t, std::size_t, std::size_t>> test_cases =
-        {
-            // header + chunk table + chunks = buffer size
-            {1024, 4, buffer_header_size + 4 * chunk_row_size + 4 * 1024},
-            {2048, 4, buffer_header_size + 4 * chunk_row_size + 4 * 2048},
-            {4096, 4, buffer_header_size + 4 * chunk_row_size + 4 * 4096},
-            {8192, 4, buffer_header_size + 4 * chunk_row_size + 4 * 8192},
-            {16384, 4, buffer_header_size + 4 * chunk_row_size + 4 * 16384},
-            {32768, 4, buffer_header_size + 4 * chunk_row_size + 4 * 32768},
-            {65536, 4, buffer_header_size + 4 * chunk_row_size + 4 * 65536},
-            {131072, 4, buffer_header_size + 4 * chunk_row_size + 4 * 131072},
-            {262144, 4, buffer_header_size + 4 * chunk_row_size + 4 * 262144},
-            {1024, 8, buffer_header_size + 8 * chunk_row_size + 8 * 1024},
-            {2048, 8, buffer_header_size + 8 * chunk_row_size + 8 * 2048},
-            {4096, 8, buffer_header_size + 8 * chunk_row_size + 8 * 4096},
-            {8192, 8, buffer_header_size + 8 * chunk_row_size + 8 * 8192},
-            {16384, 8, buffer_header_size + 8 * chunk_row_size + 8 * 16384},
-            {32768, 8, buffer_header_size + 8 * chunk_row_size + 8 * 32768},
-            {65536, 8, buffer_header_size + 8 * chunk_row_size + 8 * 65536},
-            {131072, 8, buffer_header_size + 8 * chunk_row_size + 8 * 131072},
-            {262144, 8, buffer_header_size + 8 * chunk_row_size + 8 * 262144},
-        };
-
-    for (const auto& [chunk_target_size, chunk_count, expected_size] :
-         test_cases)
-    {
-        auto buffer_size =
-            ouroboros::detail::buffer_format::compute_buffer_size(
-                chunk_target_size, chunk_count);
-        SCOPED_TRACE(
-            ::testing::Message()
-            << "chunk_target_size: " << chunk_target_size << " chunk_count: "
-            << chunk_count << " expected_size: " << expected_size << std::endl
-            << "If this test fails, it means that the header format has "
-               "changed, consider incrementing the version number");
-        EXPECT_EQ(buffer_size, expected_size);
-    }
-}
-
-TEST(test_reader_writer, buffer_readiness)
+TEST(test_reader_writer, buffer_restarted_when_id_changes)
 {
     constexpr std::size_t chunk_target_size = 1024;
     constexpr std::size_t chunk_count = 4;
-    auto buffer_size = ouroboros::detail::buffer_format::compute_buffer_size(
-        chunk_target_size, chunk_count);
-    auto buffer = create_aligned_buffer(buffer_size);
-    std::span<uint8_t> buffer_span(buffer);
-
-    // Initially buffer should not be ready
-    EXPECT_FALSE(
-        ouroboros::reader::is_ready(std::span<const uint8_t>(buffer_span)));
-
-    // Configure writer (this writes the header)
-    ouroboros::writer writer;
-    writer.configure(buffer_span, chunk_target_size, chunk_count);
-
-    // Now buffer should be ready
-    EXPECT_TRUE(
-        ouroboros::reader::is_ready(std::span<const uint8_t>(buffer_span)));
-
-    // Test with uninitialized buffer (must be at least buffer_header_size)
-    std::vector<uint8_t> uninit_buffer(100);
-    std::memset(uninit_buffer.data(), 0, uninit_buffer.size());
-    EXPECT_FALSE(
-        ouroboros::reader::is_ready(std::span<const uint8_t>(uninit_buffer)));
-}
-
-TEST(test_reader_writer, writer_configure)
-{
-    constexpr std::size_t chunk_target_size = 1024;
-    constexpr std::size_t chunk_count = 4;
+    constexpr uint64_t initial_id = 1;
+    constexpr uint64_t new_id = 2;
     auto buffer_size = ouroboros::detail::buffer_format::compute_buffer_size(
         chunk_target_size, chunk_count);
     auto buffer = create_aligned_buffer(buffer_size);
     std::span<uint8_t> buffer_span(buffer);
 
     ouroboros::writer writer;
-    writer.configure(buffer_span, chunk_target_size, chunk_count);
+    auto config_result = writer.configure(buffer_span, chunk_target_size,
+                                          chunk_count, initial_id);
+    ASSERT_TRUE(config_result.has_value());
+    writer.write("first");
 
-    EXPECT_EQ(writer.chunk_target_size(), chunk_target_size);
-    EXPECT_EQ(writer.chunk_count(), chunk_count);
-    EXPECT_GT(writer.max_entry_size(), 0U);
-}
-
-TEST(test_reader_writer, writer_write_single_entry)
-{
-    constexpr std::size_t chunk_target_size = 1024;
-    constexpr std::size_t chunk_count = 4;
-    auto buffer_size = ouroboros::detail::buffer_format::compute_buffer_size(
-        chunk_target_size, chunk_count);
-    auto buffer = create_aligned_buffer(buffer_size);
-    std::span<uint8_t> buffer_span(buffer);
-
-    ouroboros::writer writer;
-    writer.configure(buffer_span, chunk_target_size, chunk_count);
-
-    std::string test_entry = "Hello, World!";
-    writer.write(test_entry);
-
-    // Verify entry was written by reading it back
     ouroboros::reader reader;
     auto result = reader.configure(std::span<const uint8_t>(buffer_span));
     ASSERT_TRUE(result.has_value());
 
-    auto entry_result = reader.read_next_entry();
-    ASSERT_TRUE(entry_result.has_value());
-    EXPECT_EQ(entry_result->data, test_entry);
-    EXPECT_TRUE(entry_result->is_valid());
+    auto entry = reader.read_next_entry();
+    ASSERT_TRUE(entry.has_value());
+    EXPECT_EQ(entry->data, "first");
 
-    // Should be no more entries
+    // Configure writer with new ID using force_init to reinitialize buffer
+    // This simulates a new writer taking over with a different ID
+    // Note: force_init reinitializes the buffer, so "first" will be lost
+    auto force_result = writer.configure(buffer_span, chunk_target_size,
+                                         chunk_count, new_id, true);
+    ASSERT_TRUE(force_result.has_value()) << force_result.error().message();
+    writer.write("second");
+
+    // Next read should return buffer_restarted because the buffer ID changed
+    auto restart_result = reader.read_next_entry();
+    ASSERT_FALSE(restart_result.has_value());
+    EXPECT_EQ(restart_result.error(),
+              ouroboros::make_error_code(ouroboros::error::buffer_restarted));
+
+    // Reconfigure reader - it should start from the beginning
+    auto reconfig_result =
+        reader.configure(std::span<const uint8_t>(buffer_span));
+    ASSERT_TRUE(reconfig_result.has_value());
+    EXPECT_EQ(reader.buffer_id(), new_id);
+
+    // Read entries - only "second" exists since force_init reinitialized
+    auto entry1 = reader.read_next_entry();
+    ASSERT_TRUE(entry1.has_value());
+    EXPECT_EQ(entry1->data, "second");
+
+    // No more entries
     auto no_more = reader.read_next_entry();
     EXPECT_FALSE(no_more.has_value());
-}
-
-TEST(test_reader_writer, writer_write_multiple_entries)
-{
-    constexpr std::size_t chunk_target_size = 1024;
-    constexpr std::size_t chunk_count = 4;
-    auto buffer_size = ouroboros::detail::buffer_format::compute_buffer_size(
-        chunk_target_size, chunk_count);
-    auto buffer = create_aligned_buffer(buffer_size);
-    std::span<uint8_t> buffer_span(buffer);
-
-    ouroboros::writer writer;
-    writer.configure(buffer_span, chunk_target_size, chunk_count);
-
-    std::vector<std::string> test_entries = {"First entry", "Second entry",
-                                             "Third entry", "Fourth entry",
-                                             "Fifth entry"};
-
-    for (const auto& entry : test_entries)
-    {
-        writer.write(entry);
-    }
-
-    // Read back all entries
-    ouroboros::reader reader;
-    auto result = reader.configure(std::span<const uint8_t>(buffer_span));
-    ASSERT_TRUE(result.has_value());
-
-    for (const auto& expected_entry : test_entries)
-    {
-        auto entry_result = reader.read_next_entry();
-        ASSERT_TRUE(entry_result.has_value());
-        EXPECT_EQ(entry_result->data, expected_entry);
-        EXPECT_TRUE(entry_result->is_valid());
-    }
-
-    // Should be no more entries
-    auto no_more = reader.read_next_entry();
-    EXPECT_FALSE(no_more.has_value());
-}
-
-TEST(test_reader_writer, reader_configure)
-{
-    constexpr std::size_t chunk_target_size = 1024;
-    constexpr std::size_t chunk_count = 4;
-    auto buffer_size = ouroboros::detail::buffer_format::compute_buffer_size(
-        chunk_target_size, chunk_count);
-    auto buffer = create_aligned_buffer(buffer_size);
-    std::span<uint8_t> buffer_span(buffer);
-
-    // Configure reader before writer - should fail
-    ouroboros::reader reader;
-    auto result = reader.configure(std::span<const uint8_t>(buffer_span));
-    EXPECT_FALSE(result.has_value());
-
-    // Configure writer first
-    ouroboros::writer writer;
-    writer.configure(buffer_span, chunk_target_size, chunk_count);
-
-    // Configure reader again - should succeed
-    result = reader.configure(std::span<const uint8_t>(buffer_span));
-    ASSERT_TRUE(result.has_value());
-
-    EXPECT_EQ(reader.chunk_count(), chunk_count);
-}
-
-TEST(test_reader_writer, reader_empty_buffer_handling)
-{
-    constexpr std::size_t chunk_target_size = 1024;
-    constexpr std::size_t chunk_count = 4;
-    auto buffer_size = ouroboros::detail::buffer_format::compute_buffer_size(
-        chunk_target_size, chunk_count);
-    auto buffer = create_aligned_buffer(buffer_size);
-    std::span<uint8_t> buffer_span(buffer);
-
-    ouroboros::writer writer;
-    writer.configure(buffer_span, chunk_target_size, chunk_count);
-
-    ouroboros::reader reader;
-    auto result = reader.configure(std::span<const uint8_t>(buffer_span));
-    ASSERT_TRUE(result.has_value());
-
-    // Try to read from empty buffer - should fail
-    auto entry_result = reader.read_next_entry();
-    ASSERT_FALSE(entry_result.has_value());
-    EXPECT_EQ(entry_result.error(),
-              ouroboros::make_error_code(ouroboros::error::no_data_available));
-}
-
-TEST(test_reader_writer, reader_configure_invalid_magic)
-{
-    std::vector<uint8_t> buffer(1000);
-    std::memset(buffer.data(), 0, buffer.size());
-
-    buffer[0] = 0x0D; // Corrupt magic bytes
-    buffer[1] = 0x0E;
-    buffer[2] = 0x0A;
-    buffer[3] = 0x0D;
-
-    ouroboros::reader reader;
-    auto result = reader.configure(std::span<const uint8_t>(buffer));
-    EXPECT_FALSE(result.has_value());
-}
-
-TEST(test_reader_writer, reader_configure_invalid_version)
-{
-    constexpr std::size_t chunk_target_size = 1024;
-    constexpr std::size_t chunk_count = 4;
-    auto buffer_size = ouroboros::detail::buffer_format::compute_buffer_size(
-        chunk_target_size, chunk_count);
-    auto buffer = create_aligned_buffer(buffer_size);
-    std::span<uint8_t> buffer_span(buffer);
-
-    // Configure writer first
-    ouroboros::writer writer;
-    writer.configure(buffer_span, chunk_target_size, chunk_count);
-
-    // Corrupt version
-    buffer[4] = 0xFF;
-    buffer[5] = 0xFF;
-    buffer[6] = 0xFF;
-    buffer[7] = 0xFF;
-
-    ouroboros::reader reader;
-    auto result = reader.configure(std::span<const uint8_t>(buffer_span));
-    EXPECT_FALSE(result.has_value());
 }
 
 TEST(test_reader_writer, entry_alignment)
@@ -457,204 +251,7 @@ TEST(test_reader_writer, maximum_entry)
     EXPECT_EQ(entry_result->data, large_entry);
 }
 
-TEST(test_reader_writer, reader_token_validation)
-{
-    constexpr std::size_t chunk_target_size = 128;
-    constexpr std::size_t chunk_count = 4;
-    auto buffer_size = ouroboros::detail::buffer_format::compute_buffer_size(
-        chunk_target_size, chunk_count);
-    auto buffer = create_aligned_buffer(buffer_size);
-    std::span<uint8_t> buffer_span(buffer);
-
-    ouroboros::writer writer;
-    writer.configure(buffer_span, chunk_target_size, chunk_count);
-
-    writer.write("Test entry");
-
-    ouroboros::reader reader;
-    auto result = reader.configure(std::span<const uint8_t>(buffer_span));
-    ASSERT_TRUE(result.has_value());
-
-    auto entry_result = reader.read_next_entry();
-    ASSERT_TRUE(entry_result.has_value());
-
-    // Entry should be valid initially
-    EXPECT_TRUE(entry_result->is_valid());
-
-    // Write more entries (this may invalidate the previous entry if buffer
-    // wraps)
-    for (int i = 0; i < 100; ++i)
-    {
-        std::string entry = "Entry " + std::to_string(i);
-        writer.write(entry);
-    }
-
-    EXPECT_FALSE(entry_result->is_valid());
-}
-
-TEST(test_reader_writer, multiple_readers)
-{
-    constexpr std::size_t chunk_target_size = 128;
-    constexpr std::size_t chunk_count = 4;
-    auto buffer_size = ouroboros::detail::buffer_format::compute_buffer_size(
-        chunk_target_size, chunk_count);
-    auto buffer = create_aligned_buffer(buffer_size);
-    std::span<uint8_t> buffer_span(buffer);
-
-    ouroboros::writer writer;
-    writer.configure(buffer_span, chunk_target_size, chunk_count);
-
-    std::vector<std::string> test_entries = {"One", "Two", "Three"};
-
-    for (const auto& entry : test_entries)
-    {
-        writer.write(entry);
-    }
-
-    // Create multiple readers
-    ouroboros::reader reader1;
-    auto result1 = reader1.configure(std::span<const uint8_t>(buffer_span));
-    ASSERT_TRUE(result1.has_value());
-
-    ouroboros::reader reader2;
-    auto result2 = reader2.configure(std::span<const uint8_t>(buffer_span));
-    ASSERT_TRUE(result2.has_value());
-
-    // Both readers should be able to read the same entries
-    for (const auto& expected_entry : test_entries)
-    {
-        auto entry1 = reader1.read_next_entry();
-        auto entry2 = reader2.read_next_entry();
-
-        ASSERT_TRUE(entry1.has_value());
-        ASSERT_TRUE(entry2.has_value());
-
-        EXPECT_EQ(entry1->data, expected_entry);
-        EXPECT_EQ(entry2->data, expected_entry);
-    }
-}
-
-TEST(test_reader_writer, reader_starting_chunk_selection)
-{
-    constexpr std::size_t chunk_target_size = 128;
-    constexpr std::size_t chunk_count = 2;
-    auto buffer_size = ouroboros::detail::buffer_format::compute_buffer_size(
-        chunk_target_size, chunk_count);
-    auto buffer = create_aligned_buffer(buffer_size);
-    std::span<uint8_t> buffer_span(buffer);
-
-    ouroboros::writer writer;
-    writer.configure(buffer_span, chunk_target_size, chunk_count);
-
-    // Write entries to advance through chunks
-    for (int i = 0; i < 30; ++i)
-    {
-        std::string entry = std::string(i, 'A') + "Entry " + std::to_string(i);
-        writer.write(entry);
-    }
-
-    ouroboros::reader reader;
-    auto result = reader.configure(std::span<const uint8_t>(buffer_span));
-    ASSERT_TRUE(result.has_value());
-
-    // Reader should start from appropriate chunk
-    // Should be able to read at least some entries
-    int read_count = 0;
-    while (read_count < 10)
-    {
-        auto entry_result = reader.read_next_entry();
-        if (!entry_result.has_value())
-        {
-            break;
-        }
-        read_count++;
-    }
-
-    EXPECT_GT(read_count, 0);
-    EXPECT_LT(read_count, 30); // Some entries may have been overwritten
-}
-
-// Helper to generate a string entry consiting of the entry_counter followed by
-// a random number of characters to reach target size
-auto generate_entry(std::size_t entry_counter,
-                    std::size_t target_size) -> std::string
-{
-    std::string entry = std::to_string(entry_counter);
-    while (entry.size() < target_size)
-    {
-        entry += 'A' + (entry_counter % 26); // Cycle through A-Z
-    }
-
-    return entry;
-}
-
-TEST(test_reader_writer, reader_detects_overwritten_entry)
-{
-    constexpr std::size_t chunk_target_size = 64; // Small chunk to force wraps
-    constexpr std::size_t chunk_count = 2;
-    auto buffer_size = ouroboros::detail::buffer_format::compute_buffer_size(
-        chunk_target_size, chunk_count);
-    auto buffer = create_aligned_buffer(buffer_size);
-    std::span<uint8_t> buffer_span(buffer);
-
-    ouroboros::writer writer;
-    writer.configure(buffer_span, chunk_target_size, chunk_count);
-
-    ouroboros::reader reader;
-    auto result = reader.configure(std::span<const uint8_t>(buffer_span));
-    ASSERT_TRUE(result.has_value());
-
-    // Writer writes first entry
-    std::string first_entry = "First entry";
-    writer.write(first_entry);
-
-    // Reader reads the first entry
-    auto entry_result1 = reader.read_next_entry();
-    ASSERT_TRUE(entry_result1.has_value());
-    EXPECT_EQ(entry_result1->data, first_entry);
-    EXPECT_TRUE(entry_result1->is_valid());
-
-    // Writer writes enough entries to overwrite the first entry
-    // We need to write enough to cause a wrap and overwrite
-    // Calculate approximate entries needed: buffer size / average entry size
-    // Each entry is roughly: header (4) + payload + alignment padding
-    std::size_t entries_to_write = 0;
-    while (entries_to_write < 50) // Safety limit
-    {
-        std::string entry = "Entry " + std::to_string(entries_to_write);
-        writer.write(entry);
-        entries_to_write++;
-
-        // Check if the first entry is now invalid
-        if (!entry_result1->is_valid())
-        {
-            break;
-        }
-    }
-
-    // The first entry should now be invalid (overwritten)
-    EXPECT_FALSE(entry_result1->is_valid())
-        << "First entry should be invalid after buffer wrap";
-
-    // Reader will now skip to next valid chunk and continue reading from there
-    bool found_new_entry = false;
-    int read_count = 0;
-    for (int i = 0; i < entries_to_write; ++i)
-    {
-        auto entry_result = reader.read_next_entry();
-        if (!entry_result.has_value())
-        {
-            break;
-        }
-        read_count++;
-        EXPECT_NE(entry_result->data, first_entry);
-    }
-
-    EXPECT_GT(entries_to_write, 0) << "Should have written at least one entry";
-    EXPECT_GT(read_count, 0) << "Should have read at least one entry";
-}
-
-TEST(test_reader_writer, reader_writer_interleaved_operations)
+TEST(test_reader_writer, interleaved_operations)
 {
     constexpr std::size_t chunk_target_size = 1024;
     constexpr std::size_t chunk_count = 4;
@@ -709,10 +306,10 @@ TEST(test_reader_writer, reader_writer_interleaved_operations)
               ouroboros::make_error_code(ouroboros::error::no_data_available));
 }
 
-TEST(test_reader_writer, reader_handles_rapid_writes)
+TEST(test_reader_writer, writer_finish_reader_returns_writer_finished)
 {
-    constexpr std::size_t chunk_target_size = 128;
-    constexpr std::size_t chunk_count = 3;
+    constexpr std::size_t chunk_target_size = 1024;
+    constexpr std::size_t chunk_count = 4;
     auto buffer_size = ouroboros::detail::buffer_format::compute_buffer_size(
         chunk_target_size, chunk_count);
     auto buffer = create_aligned_buffer(buffer_size);
@@ -721,43 +318,33 @@ TEST(test_reader_writer, reader_handles_rapid_writes)
     ouroboros::writer writer;
     writer.configure(buffer_span, chunk_target_size, chunk_count);
 
+    writer.write("First entry");
+    writer.write("Second entry");
+    writer.finish();
+
     ouroboros::reader reader;
     auto result = reader.configure(std::span<const uint8_t>(buffer_span));
-    ASSERT_TRUE(result.has_value())
-        << "Reader configuration failed: " << result.error().message();
+    ASSERT_TRUE(result.has_value());
 
-    // Writer writes many entries rapidly
-    constexpr int num_entries = 20;
-    for (int i = 0; i < num_entries; ++i)
-    {
-        std::string entry = "Rapid entry " + std::to_string(i);
-        writer.write(entry);
-    }
+    auto entry1 = reader.read_next_entry();
+    ASSERT_TRUE(entry1.has_value());
+    EXPECT_EQ(entry1->data, "First entry");
 
-    // Reader should be able to read entries (may not get all due to
-    // overwrites)
-    std::vector<std::string> read_entries;
-    std::string error_message;
-    while (read_entries.size() < num_entries)
-    {
-        auto entry_result = reader.read_next();
-        if (entry_result)
-        {
-            read_entries.push_back(entry_result.value());
-        }
-        else
-        {
-            error_message = entry_result.error().message();
-            break;
-        }
-    }
+    auto entry2 = reader.read_next_entry();
+    ASSERT_TRUE(entry2.has_value());
+    EXPECT_EQ(entry2->data, "Second entry");
 
-    SCOPED_TRACE(::testing::Message() << "Error message: " << error_message);
+    // After finish, reader should return writer_finished
+    auto finish_result = reader.read_next_entry();
+    ASSERT_FALSE(finish_result.has_value());
+    EXPECT_EQ(finish_result.error(),
+              ouroboros::make_error_code(ouroboros::error::writer_finished));
 
-    // Should have read at least some entries
-    EXPECT_GT(read_entries.size(), 0) << "Should read at least some entries";
-    EXPECT_LE(read_entries.size(), num_entries)
-        << "Should not read more entries than written";
+    // Subsequent reads should also return writer_finished
+    auto subsequent_result = reader.read_next_entry();
+    ASSERT_FALSE(subsequent_result.has_value());
+    EXPECT_EQ(subsequent_result.error(),
+              ouroboros::make_error_code(ouroboros::error::writer_finished));
 }
 
 TEST(test_reader_writer, chunk_invalidation_and_wrap_sequence)
@@ -786,11 +373,11 @@ TEST(test_reader_writer, chunk_invalidation_and_wrap_sequence)
         ouroboros::detail::buffer_format::buffer_header_size +
         (chunk_count * ouroboros::detail::buffer_format::chunk_row_size);
     ASSERT_EQ(header_and_table,
-              80); // header_and_table = 16 + (4 * 16) = 80 bytes
-    // First chunk starts at 80, which is already 4-byte aligned
+              88); // header_and_table = 24 + (4 * 16) = 88 bytes
+    // First chunk starts at 88, which is already 4-byte aligned
     const std::size_t usable_space = buffer_size - header_and_table;
     ASSERT_EQ(usable_space,
-              1024); // usable_space = (16 + 64 + 1024) - 80 = 1024 bytes
+              1024); // usable_space = (24 + 64 + 1024) - 88 = 1024 bytes
 
     // Calculate entries per chunk
     constexpr std::size_t entries_per_chunk =
@@ -1030,162 +617,4 @@ TEST(test_reader_writer, chunk_invalidation_and_wrap_sequence)
         auto no_more = reader2.read_next_entry();
         EXPECT_FALSE(no_more.has_value());
     }
-}
-
-TEST(test_reader_writer, multi_threaded_with_wraps)
-{
-    // Use a small buffer to force multiple wraps
-    constexpr std::size_t chunk_target_size = 1024;
-    constexpr std::size_t chunk_count = 42;
-    auto buffer_size = ouroboros::detail::buffer_format::compute_buffer_size(
-        chunk_target_size, chunk_count);
-    auto buffer = create_aligned_buffer(buffer_size);
-    std::span<uint8_t> buffer_span(buffer);
-
-    ouroboros::writer writer;
-    writer.configure(buffer_span, chunk_target_size, chunk_count);
-
-    // Test parameters
-    constexpr int num_reader_threads = 10;
-    constexpr std::chrono::seconds test_duration(5);
-    constexpr int entries_per_batch = 4;
-
-    // Synchronization
-    std::atomic<bool> writer_running{true};
-    std::atomic<std::uint64_t> entries_written{0};
-    std::atomic<std::uint64_t> total_reads{0};
-    std::atomic<std::uint64_t> valid_reads{0};
-    std::atomic<std::uint64_t> invalid_reads{0};
-    std::mutex read_entries_mutex;
-    std::vector<std::string> read_entries; // All reads (may have duplicates)
-    std::set<std::string> unique_read_entries; // Unique entries read
-
-    // Reader threads - continuously read entries
-    std::vector<std::thread> reader_threads;
-    for (int t = 0; t < num_reader_threads; ++t)
-    {
-        reader_threads.emplace_back(
-            [&, t]()
-            {
-                ouroboros::reader reader;
-
-                // Retry configuration until buffer is ready (writer may not
-                // have started yet)
-                auto result =
-                    reader.configure(std::span<const uint8_t>(buffer_span));
-                while (!result.has_value() && writer_running.load())
-                {
-                    std::this_thread::sleep_for(std::chrono::milliseconds(1));
-                    result =
-                        reader.configure(std::span<const uint8_t>(buffer_span));
-                }
-                ASSERT_TRUE(result.has_value());
-
-                int consecutive_failures = 0;
-                constexpr int max_consecutive_failures = 1000;
-
-                while (writer_running.load() ||
-                       consecutive_failures < max_consecutive_failures)
-                {
-                    auto entry_result = reader.read_next();
-                    if (entry_result.has_value())
-                    {
-                        consecutive_failures = 0;
-
-                        // Store the entry string for verification
-                        {
-                            std::lock_guard<std::mutex> lock(
-                                read_entries_mutex);
-                            total_reads.fetch_add(1, std::memory_order_relaxed);
-                            valid_reads.fetch_add(1, std::memory_order_relaxed);
-                            read_entries.push_back(entry_result.value());
-                            unique_read_entries.insert(entry_result.value());
-                        }
-                    }
-                    else
-                    {
-                        consecutive_failures++;
-                        // Small delay when no data available
-                        // Increase delay as failures accumulate to avoid
-                        // busy-waiting
-                        std::this_thread::sleep_for(std::chrono::microseconds(
-                            10 + consecutive_failures));
-                    }
-                }
-            });
-    }
-
-    // Writer runs in main thread - continuously writes entries
-    int entry_counter = 0;
-    auto start_time = std::chrono::steady_clock::now();
-
-    while (writer_running.load())
-    {
-        // Write a batch of entries
-        for (int i = 0; i < entries_per_batch; ++i)
-        {
-            // Generate unique entry: include counter, timestamp, and unique
-            // data
-            std::string entry = "ENTRY_" + std::to_string(entry_counter) + "_" +
-                                std::to_string(std::chrono::steady_clock::now()
-                                                   .time_since_epoch()
-                                                   .count()) +
-                                "_";
-
-            // Pad to target size with unique data
-            std::size_t target_size = chunk_target_size * 1.5;
-            while (entry.size() < target_size)
-            {
-                // Use entry_counter in a way that ensures uniqueness
-                entry += std::to_string(entry_counter * 1000 + entry.size());
-            }
-
-            writer.write(entry);
-            entry_counter++;
-            entries_written.fetch_add(1, std::memory_order_relaxed);
-        }
-
-        // Check if we should stop
-        auto elapsed = std::chrono::steady_clock::now() - start_time;
-        if (elapsed >= test_duration)
-        {
-            writer_running.store(false);
-            break;
-        }
-
-        // Small delay to allow readers to catch up
-        std::this_thread::sleep_for(std::chrono::milliseconds(10));
-    }
-
-    // Give readers a moment to finish reading remaining entries
-    std::this_thread::sleep_for(std::chrono::milliseconds(100));
-
-    // Wait for all reader threads
-    for (auto& thread : reader_threads)
-    {
-        thread.join();
-    }
-
-    // Verify test results
-    auto writes = entries_written.load();
-    auto reads = total_reads.load();
-    auto valid = valid_reads.load();
-    auto invalid = invalid_reads.load();
-
-    // Get unique entries count (thread-safe, all readers are joined)
-    std::size_t unique_count = unique_read_entries.size();
-
-    // We should have written many entries
-    EXPECT_GT(writes, 0U) << "Writer should have written some entries";
-
-    // We should have read many entries (can be more than writes due to multiple
-    // readers)
-    EXPECT_GT(reads, 0U) << "Readers should have read some entries";
-
-    // Most reads should be valid (some may be invalid due to overwrites during
-    // wraps)
-    EXPECT_GT(valid, 0U) << "Should have at least some valid reads";
-
-    EXPECT_EQ(unique_count, writes)
-        << "Unique entries read should be equal to entries written";
 }
