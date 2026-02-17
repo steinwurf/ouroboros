@@ -11,7 +11,7 @@ inline namespace STEINWURF_OUROBOROS_VERSION
 
 std::string version()
 {
-    return "38.0.0";
+    return "1.2.0";
 }
 }
 }

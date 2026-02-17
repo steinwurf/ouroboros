@@ -59,6 +59,11 @@ def prepare_release(ctx):
         )
         f.regex_replace(pattern=pattern, replacement=replacement)
 
+    with ctx.rewrite_file(filename="src/ouroboros/version.cpp") as f:
+        pattern = r"    return \"\d+\.\d+\.\d+\";"
+        replacement = '    return "{}";'.format(VERSION)
+        f.regex_replace(pattern=pattern, replacement=replacement)
+
     with ctx.rewrite_file(filename="CMakeLists.txt") as f:
         pattern = r"project\(ouroboros VERSION \d+\.\d+\.\d+\)"
         replacement = "project(ouroboros VERSION {})".format(VERSION)
