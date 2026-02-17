@@ -6,6 +6,10 @@ every change, see the Git log.
 
 Latest
 ------
+* tbd
+
+1.2.0
+-----
 * Minor: Added writer finish (end-of-stream) support. Writers can signal
   completion with a special entry (length 3), allowing readers to detect
   that no more data will be written and unlink shared memory.
