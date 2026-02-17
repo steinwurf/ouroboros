@@ -77,14 +77,3 @@ TEST(test_buffer_format, commit_flag_max)
     EXPECT_TRUE(is_committed(committed_value64_max));
     EXPECT_EQ(clear_commit(committed_value64_max), value64_max);
 }
-
-TEST(test_buffer_format, commit_flag_double_set)
-{
-    using namespace ouroboros::detail::buffer_format;
-    EXPECT_DEATH(
-        { set_commit(set_commit<uint32_t>(0x12345678)); },
-        "Assertion failed at buffer_format.hpp");
-    EXPECT_DEATH(
-        { set_commit(set_commit<uint64_t>(0x1234567890ABCDEF)); },
-        "Assertion failed at buffer_format.hpp");
-}

@@ -456,6 +456,11 @@ struct ResumeTestCase
     std::size_t second_chunk_target_size;
     std::size_t second_chunk_count;
     uint64_t second_buffer_id;
+
+    friend void PrintTo(const ResumeTestCase& tc, std::ostream* os)
+    {
+        *os << tc.name;
+    }
 };
 
 class WriterResumeTest : public ::testing::TestWithParam<ResumeTestCase>
