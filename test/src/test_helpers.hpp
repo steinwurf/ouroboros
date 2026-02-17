@@ -8,7 +8,11 @@
 #include <string>
 #include <vector>
 
+#ifdef _WIN32
+#include <process.h>
+#else
 #include <unistd.h>
+#endif
 
 namespace test_helpers
 {
@@ -42,7 +46,11 @@ inline auto generate_shm_name() -> std::string
 {
     static std::atomic<uint32_t> counter{0};
     auto c = counter.fetch_add(1, std::memory_order_relaxed);
+#ifdef _WIN32
+    auto pid = static_cast<uint32_t>(::_getpid());
+#else
     auto pid = static_cast<uint32_t>(::getpid());
+#endif
 
     // "/ouroboros_" (10) + pid (up to 10) + "_" (1) + counter (up to 10) = <=
     // 31-ish
