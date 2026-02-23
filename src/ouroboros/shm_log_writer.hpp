@@ -115,13 +115,13 @@ public:
             return tl::make_unexpected(configure_error{shm_result.error()});
         }
 
-        // Only zero-initialize if we created a new segment
+        // Zero-initialize the entire buffer on creation. This both provides
+        // a clean initial state and forces the kernel to allocate all backing
+        // pages immediately, turning a late SIGBUS (from tmpfs/shm exhaustion
+        // mid-write) into an early, diagnosable failure.
         if (shm_result->created)
         {
-            // Zero out the buffer header and chunk table
-            std::memset(
-                shm_result->ptr, 0,
-                detail::buffer_format::compute_buffer_header_size(chunk_count));
+            std::memset(shm_result->ptr, 0, shm_result->size);
         }
 
         // Configure the writer with the mapped buffer.

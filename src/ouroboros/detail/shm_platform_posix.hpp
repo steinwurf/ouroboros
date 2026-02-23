@@ -63,16 +63,19 @@ inline auto create_or_open_and_map_shm(const std::string& name,
         // Successfully created a new segment
         if (ftruncate(fd, static_cast<off_t>(size)) == -1)
         {
+            // Failed to truncate the shared memory segment
             close(fd);
             shm_unlink(name.c_str());
             return tl::make_unexpected(make_error_code(
                 ouroboros::error::shared_memory_truncate_failed));
         }
 
-        void* ptr =
-            mmap(nullptr, size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+        // Map the shared memory segment (MAP_POPULATE is used to prefault the memory)
+        void* ptr = mmap(nullptr, size, PROT_READ | PROT_WRITE,
+                         MAP_SHARED | MAP_POPULATE, fd, 0);
         if (ptr == MAP_FAILED)
         {
+            // Failed to map the shared memory segment
             close(fd);
             shm_unlink(name.c_str());
             return tl::make_unexpected(
@@ -95,10 +98,10 @@ inline auto create_or_open_and_map_shm(const std::string& name,
     }
 
     // Segment already exists - open it for read-write
-    fd = shm_open(name.c_str(), O_RDWR, 0666);
+    fd= shm_open(name.c_str(), O_RDWR, 0666);
     if (fd == -1)
     {
-        if (errno == ENOENT)
+         if (errno == ENOENT)
         {
             return tl::make_unexpected(
                 make_error_code(ouroboros::error::shared_memory_not_found));
