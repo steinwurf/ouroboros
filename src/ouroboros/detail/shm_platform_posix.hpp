@@ -6,7 +6,6 @@
 #include <fcntl.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
-#include <sys/wait.h>
 #include <unistd.h>
 
 #include <tl/expected.hpp>
@@ -44,50 +43,17 @@ struct shm_mapping
     bool created = false; ///< true if newly created, false if opened existing
 };
 
-inline auto validate_backing_allocation_with_fork(void* ptr,
-                                                  std::size_t size) -> bool
+inline auto validate_backing_allocation_with_posix_fallocate(int fd,
+                                                             std::size_t size)
+    -> bool
 {
-    if (ptr == nullptr || size == 0)
+    if (fd == -1 || size == 0)
     {
         return false;
     }
 
-    long page_size = sysconf(_SC_PAGESIZE);
-    if (page_size <= 0)
-    {
-        page_size = 4096;
-    }
-
-    const std::size_t stride = static_cast<std::size_t>(page_size);
-    const pid_t pid = fork();
-    if (pid == -1)
-    {
-        return false;
-    }
-
-    if (pid == 0)
-    {
-        // Child process: touch one byte per page to force backing allocation.
-        // If the mapping cannot be backed, the child may receive SIGBUS.
-        auto* bytes = static_cast<uint8_t*>(ptr);
-        for (std::size_t offset = 0; offset < size; offset += stride)
-        {
-            bytes[offset] = 0;
-        }
-        bytes[size - 1] = 0;
-        _exit(0);
-    }
-
-    int status = 0;
-    while (waitpid(pid, &status, 0) == -1)
-    {
-        if (errno != EINTR)
-        {
-            return false;
-        }
-    }
-
-    return WIFEXITED(status) && WEXITSTATUS(status) == 0;
+    const int result = posix_fallocate(fd, 0, static_cast<off_t>(size));
+    return result == 0;
 }
 
 /// Create or open and map a shared memory segment for writing (POSIX
@@ -135,7 +101,7 @@ inline auto create_or_open_and_map_shm(const std::string& name,
         VERIFY(reinterpret_cast<uintptr_t>(ptr) % 8 == 0,
                "Mapped shared memory is not 8-byte aligned");
 
-        if (!validate_backing_allocation_with_fork(ptr, size))
+        if (!validate_backing_allocation_with_posix_fallocate(fd, size))
         {
             munmap(ptr, size);
             close(fd);
