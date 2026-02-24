@@ -19,6 +19,8 @@ ERROR_TAG(shared_memory_not_found, "Shared memory segment not found.")
 ERROR_TAG(shared_memory_truncate_failed,
           "Failed to truncate shared memory segment.")
 ERROR_TAG(shared_memory_map_failed, "Failed to map shared memory segment.")
+ERROR_TAG(shared_memory_backing_allocation_failed,
+          "Shared memory backing allocation failed.")
 ERROR_TAG(shared_memory_stat_failed,
           "Failed to get shared memory segment status.")
 ERROR_TAG(shared_memory_not_supported,

@@ -6,6 +6,7 @@
 #include <fcntl.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
+#include <sys/wait.h>
 #include <unistd.h>
 
 #include <tl/expected.hpp>
@@ -43,6 +44,52 @@ struct shm_mapping
     bool created = false; ///< true if newly created, false if opened existing
 };
 
+inline auto validate_backing_allocation_with_fork(void* ptr,
+                                                  std::size_t size) -> bool
+{
+    if (ptr == nullptr || size == 0)
+    {
+        return false;
+    }
+
+    long page_size = sysconf(_SC_PAGESIZE);
+    if (page_size <= 0)
+    {
+        page_size = 4096;
+    }
+
+    const std::size_t stride = static_cast<std::size_t>(page_size);
+    const pid_t pid = fork();
+    if (pid == -1)
+    {
+        return false;
+    }
+
+    if (pid == 0)
+    {
+        // Child process: touch one byte per page to force backing allocation.
+        // If the mapping cannot be backed, the child may receive SIGBUS.
+        auto* bytes = static_cast<uint8_t*>(ptr);
+        for (std::size_t offset = 0; offset < size; offset += stride)
+        {
+            bytes[offset] = 0;
+        }
+        bytes[size - 1] = 0;
+        _exit(0);
+    }
+
+    int status = 0;
+    while (waitpid(pid, &status, 0) == -1)
+    {
+        if (errno != EINTR)
+        {
+            return false;
+        }
+    }
+
+    return WIFEXITED(status) && WEXITSTATUS(status) == 0;
+}
+
 /// Create or open and map a shared memory segment for writing (POSIX
 /// implementation)
 ///
@@ -70,9 +117,12 @@ inline auto create_or_open_and_map_shm(const std::string& name,
                 ouroboros::error::shared_memory_truncate_failed));
         }
 
-        // Map the shared memory segment (MAP_POPULATE is used to prefault the memory)
-        void* ptr = mmap(nullptr, size, PROT_READ | PROT_WRITE,
-                         MAP_SHARED | MAP_POPULATE, fd, 0);
+        int mmap_flags = MAP_SHARED;
+#ifdef MAP_POPULATE
+        mmap_flags |= MAP_POPULATE;
+#endif
+        void* ptr = mmap(nullptr, size, PROT_READ | PROT_WRITE, mmap_flags, fd,
+                         0);
         if (ptr == MAP_FAILED)
         {
             // Failed to map the shared memory segment
@@ -84,6 +134,15 @@ inline auto create_or_open_and_map_shm(const std::string& name,
 
         VERIFY(reinterpret_cast<uintptr_t>(ptr) % 8 == 0,
                "Mapped shared memory is not 8-byte aligned");
+
+        if (!validate_backing_allocation_with_fork(ptr, size))
+        {
+            munmap(ptr, size);
+            close(fd);
+            shm_unlink(name.c_str());
+            return tl::make_unexpected(make_error_code(
+                ouroboros::error::shared_memory_backing_allocation_failed));
+        }
 
         shm_handle handle;
         handle.fd = fd;
