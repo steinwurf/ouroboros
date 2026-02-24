@@ -3,7 +3,7 @@
 
 #include <CLI/CLI.hpp>
 #include <ouroboros/reader.hpp>
-#include <ouroboros/shm_log_reader.hpp>
+#include <ouroboros/shm_file.hpp>
 
 #include <fstream>
 #include <iostream>
@@ -30,9 +30,19 @@ auto main(int argc, char* argv[]) -> int
     }
 
     // Configure reader with from_lowest strategy
-    ouroboros::shm_log_reader reader;
-    auto config_result = reader.configure(
-        shm_name, ouroboros::reader::read_strategy::from_lowest);
+    ouroboros::shm_file<ouroboros::shm_access::read_only> shm_file;
+    auto shm_result = shm_file.open(shm_name);
+    if (!shm_result.has_value())
+    {
+        std::cerr << "Error: Failed to open shared memory: "
+                  << shm_result.error().message() << "\n";
+        return 1;
+    }
+
+    ouroboros::reader reader;
+    auto config_result =
+        reader.configure(std::span<const uint8_t>(shm_file.data(), shm_file.size()),
+                         ouroboros::reader::read_strategy::from_lowest);
     if (!config_result.has_value())
     {
         std::cerr << "Error: Failed to configure reader: "

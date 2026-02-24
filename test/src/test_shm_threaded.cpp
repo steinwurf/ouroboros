@@ -1,13 +1,16 @@
 // Copyright (c) 2026 Steinwurf ApS
 // SPDX-License-Identifier: MIT
 
-#include <ouroboros/shm_log_reader.hpp>
-#include <ouroboros/shm_log_writer.hpp>
+#include <ouroboros/detail/buffer_format.hpp>
+#include <ouroboros/reader.hpp>
+#include <ouroboros/shm_file.hpp>
+#include <ouroboros/writer.hpp>
 
 #include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <gtest/gtest.h>
+#include <tl/expected.hpp>
 #include <mutex>
 #include <set>
 #include <string>
@@ -18,15 +21,54 @@
 
 using test_helpers::generate_shm_name;
 
+namespace
+{
+using rw_shm_file = ouroboros::shm_file<ouroboros::shm_access::read_write>;
+using ro_shm_file = ouroboros::shm_file<ouroboros::shm_access::read_only>;
+
+auto configure_writer(rw_shm_file& shm_file, ouroboros::writer& writer,
+                      const std::string& shm_name,
+                      std::size_t chunk_target_size, std::size_t chunk_count)
+    -> tl::expected<void, ouroboros::configure_error>
+{
+    const std::size_t required_size =
+        ouroboros::detail::buffer_format::compute_buffer_size(chunk_target_size,
+                                                              chunk_count);
+    auto shm_result = shm_file.open_or_create(shm_name, required_size, true);
+    if (!shm_result.has_value())
+    {
+        return tl::make_unexpected(ouroboros::configure_error{
+            shm_result.error()});
+    }
+
+    return writer.configure(std::span<uint8_t>(shm_file.data(), shm_file.size()), chunk_target_size,
+                            chunk_count);
+}
+
+auto configure_reader(ro_shm_file& shm_file, ouroboros::reader& reader,
+                      const std::string& shm_name)
+    -> tl::expected<void, std::error_code>
+{
+    auto shm_result = shm_file.open(shm_name);
+    if (!shm_result.has_value())
+    {
+        return tl::make_unexpected(shm_result.error());
+    }
+    return reader.configure(std::span<const uint8_t>(shm_file.data(), shm_file.size()));
+}
+} // namespace
+
 TEST(test_shm_threaded, single_writer_single_reader)
 {
     constexpr std::size_t chunk_target_size = 1024;
     constexpr std::size_t chunk_count = 4;
     auto shm_name = generate_shm_name();
 
-    ouroboros::shm_log_writer writer;
+    rw_shm_file writer_shm;
+    ouroboros::writer writer;
     auto writer_result =
-        writer.configure(shm_name, chunk_target_size, chunk_count);
+        configure_writer(writer_shm, writer, shm_name, chunk_target_size,
+                         chunk_count);
     ASSERT_TRUE(writer_result.has_value());
 
     // Synchronization
@@ -42,14 +84,15 @@ TEST(test_shm_threaded, single_writer_single_reader)
     std::thread reader_thread(
         [&]()
         {
-            ouroboros::shm_log_reader reader;
+            ro_shm_file reader_shm;
+            ouroboros::reader reader;
 
             // Retry configuration until buffer is ready
-            auto reader_result = reader.configure(shm_name);
+            auto reader_result = configure_reader(reader_shm, reader, shm_name);
             while (!reader_result.has_value() && writer_running.load())
             {
                 std::this_thread::sleep_for(std::chrono::milliseconds(1));
-                reader_result = reader.configure(shm_name);
+                reader_result = configure_reader(reader_shm, reader, shm_name);
             }
             ASSERT_TRUE(reader_result.has_value());
 
@@ -119,9 +162,11 @@ TEST(test_shm_threaded, single_writer_multiple_readers)
     constexpr std::size_t chunk_count = 4;
     auto shm_name = generate_shm_name();
 
-    ouroboros::shm_log_writer writer;
+    rw_shm_file writer_shm;
+    ouroboros::writer writer;
     auto writer_result =
-        writer.configure(shm_name, chunk_target_size, chunk_count);
+        configure_writer(writer_shm, writer, shm_name, chunk_target_size,
+                         chunk_count);
     ASSERT_TRUE(writer_result.has_value());
 
     // Test parameters
@@ -143,14 +188,17 @@ TEST(test_shm_threaded, single_writer_multiple_readers)
         reader_threads.emplace_back(
             [&, t]()
             {
-                ouroboros::shm_log_reader reader;
+                ro_shm_file reader_shm;
+                ouroboros::reader reader;
 
                 // Retry configuration until buffer is ready
-                auto reader_result = reader.configure(shm_name);
+                auto reader_result =
+                    configure_reader(reader_shm, reader, shm_name);
                 while (!reader_result.has_value() && writer_running.load())
                 {
                     std::this_thread::sleep_for(std::chrono::milliseconds(1));
-                    reader_result = reader.configure(shm_name);
+                    reader_result =
+                        configure_reader(reader_shm, reader, shm_name);
                 }
                 ASSERT_TRUE(reader_result.has_value());
 
@@ -228,9 +276,11 @@ TEST(test_shm_threaded, multi_threaded_with_wraps)
     constexpr std::size_t chunk_count = 4;
     auto shm_name = generate_shm_name();
 
-    ouroboros::shm_log_writer writer;
+    rw_shm_file writer_shm;
+    ouroboros::writer writer;
     auto writer_result =
-        writer.configure(shm_name, chunk_target_size, chunk_count);
+        configure_writer(writer_shm, writer, shm_name, chunk_target_size,
+                         chunk_count);
     ASSERT_TRUE(writer_result.has_value());
 
     // Test parameters
@@ -254,14 +304,17 @@ TEST(test_shm_threaded, multi_threaded_with_wraps)
         reader_threads.emplace_back(
             [&, t]()
             {
-                ouroboros::shm_log_reader reader;
+                ro_shm_file reader_shm;
+                ouroboros::reader reader;
 
                 // Retry configuration until buffer is ready
-                auto reader_result = reader.configure(shm_name);
+                auto reader_result =
+                    configure_reader(reader_shm, reader, shm_name);
                 while (!reader_result.has_value() && writer_running.load())
                 {
                     std::this_thread::sleep_for(std::chrono::milliseconds(1));
-                    reader_result = reader.configure(shm_name);
+                    reader_result =
+                        configure_reader(reader_shm, reader, shm_name);
                 }
                 ASSERT_TRUE(reader_result.has_value());
 
@@ -377,9 +430,11 @@ TEST(test_shm_threaded, concurrent_readers_different_starting_points)
     constexpr std::size_t chunk_count = 4;
     auto shm_name = generate_shm_name();
 
-    ouroboros::shm_log_writer writer;
+    rw_shm_file writer_shm;
+    ouroboros::writer writer;
     auto writer_result =
-        writer.configure(shm_name, chunk_target_size, chunk_count);
+        configure_writer(writer_shm, writer, shm_name, chunk_target_size,
+                         chunk_count);
     ASSERT_TRUE(writer_result.has_value());
 
     // Write some initial entries
@@ -406,8 +461,10 @@ TEST(test_shm_threaded, concurrent_readers_different_starting_points)
                 // Delay each reader by different amounts
                 std::this_thread::sleep_for(std::chrono::milliseconds(t * 50));
 
-                ouroboros::shm_log_reader reader;
-                auto reader_result = reader.configure(shm_name);
+                ro_shm_file reader_shm;
+                ouroboros::reader reader;
+                auto reader_result =
+                    configure_reader(reader_shm, reader, shm_name);
                 ASSERT_TRUE(reader_result.has_value());
 
                 int consecutive_failures = 0;
@@ -469,9 +526,11 @@ TEST(test_shm_threaded,
     constexpr std::size_t chunk_count = 4;         // Small number of chunks
     auto shm_name = generate_shm_name();
 
-    ouroboros::shm_log_writer writer;
+    rw_shm_file writer_shm;
+    ouroboros::writer writer;
     auto writer_result =
-        writer.configure(shm_name, chunk_target_size, chunk_count);
+        configure_writer(writer_shm, writer, shm_name, chunk_target_size,
+                         chunk_count);
     ASSERT_TRUE(writer_result.has_value())
         << "Writer configuration failed: " << writer_result.error().message();
 
@@ -508,14 +567,17 @@ TEST(test_shm_threaded,
                 std::this_thread::sleep_for(
                     std::chrono::milliseconds(start_delay_ms));
 
-                ouroboros::shm_log_reader reader;
+                ro_shm_file reader_shm;
+                ouroboros::reader reader;
 
                 // Retry configuration until buffer is ready
-                auto reader_result = reader.configure(shm_name);
+                auto reader_result =
+                    configure_reader(reader_shm, reader, shm_name);
                 while (!reader_result.has_value() && writer_running.load())
                 {
                     std::this_thread::sleep_for(std::chrono::milliseconds(1));
-                    reader_result = reader.configure(shm_name);
+                    reader_result =
+                        configure_reader(reader_shm, reader, shm_name);
                 }
                 ASSERT_TRUE(reader_result.has_value())
                     << "Reader " << t << " configuration failed";
@@ -678,9 +740,11 @@ TEST(test_shm_threaded, maximum_throughput)
     constexpr std::size_t chunk_count = 8;
     auto shm_name = generate_shm_name();
 
-    ouroboros::shm_log_writer writer;
+    rw_shm_file writer_shm;
+    ouroboros::writer writer;
     auto writer_result =
-        writer.configure(shm_name, chunk_target_size, chunk_count);
+        configure_writer(writer_shm, writer, shm_name, chunk_target_size,
+                         chunk_count);
     ASSERT_TRUE(writer_result.has_value())
         << "Writer configuration failed: " << writer_result.error().message();
 
@@ -699,14 +763,15 @@ TEST(test_shm_threaded, maximum_throughput)
     std::thread reader_thread(
         [&]()
         {
-            ouroboros::shm_log_reader reader;
+            ro_shm_file reader_shm;
+            ouroboros::reader reader;
 
             // Retry configuration until buffer is ready
-            auto reader_result = reader.configure(shm_name);
+            auto reader_result = configure_reader(reader_shm, reader, shm_name);
             while (!reader_result.has_value() && writer_running.load())
             {
                 std::this_thread::sleep_for(std::chrono::milliseconds(1));
-                reader_result = reader.configure(shm_name);
+                reader_result = configure_reader(reader_shm, reader, shm_name);
             }
             ASSERT_TRUE(reader_result.has_value())
                 << "Reader configuration failed";

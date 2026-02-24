@@ -148,7 +148,7 @@ pytest
 - **POSIX (Linux, macOS)**: Uses `multiprocessing.shared_memory.SharedMemory` (Python 3.8+)
 - **Windows**: Uses `multiprocessing.shared_memory.SharedMemory` (Python 3.8+)
 
-The implementation matches the exact buffer format used by the C++ `shm_log_reader` and `shm_log_writer`, including:
+The implementation matches the exact buffer format used by the C++ `reader`/`writer` API with shared-memory mappings, including:
 - Buffer header with magic value and version
 - Chunk table with offsets and tokens
 - Entry framing with commit bits

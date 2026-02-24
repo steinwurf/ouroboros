@@ -3,8 +3,9 @@
 
 #include <CLI/CLI.hpp>
 #include <ouroboros/detail/buffer_format.hpp>
-#include <ouroboros/shm_log_writer.hpp>
+#include <ouroboros/shm_file.hpp>
 #include <ouroboros/shm_platform.hpp>
+#include <ouroboros/writer.hpp>
 
 #include <atomic>
 #include <chrono>
@@ -198,10 +199,24 @@ auto main(int argc, char* argv[]) -> int
     // Calculate chunk configuration
     auto [chunk_target_size, chunk_count] = calculate_chunk_config(buffer_size);
 
-    // Create shared memory writer
-    ouroboros::shm_log_writer writer;
-    auto config_result = writer.configure(shm_name, chunk_target_size,
-                                          chunk_count, unlink_at_exit);
+    // Create shared memory mapping and writer
+    const std::size_t required_size =
+        ouroboros::detail::buffer_format::compute_buffer_size(chunk_target_size,
+                                                              chunk_count);
+    ouroboros::shm_file<ouroboros::shm_access::read_write> shm_file;
+    auto shm_result =
+        shm_file.open_or_create(shm_name, required_size, unlink_at_exit);
+    if (!shm_result.has_value())
+    {
+        std::cerr << "Error: Failed to open/create shared memory: "
+                  << shm_result.error().message() << "\n";
+        return 1;
+    }
+
+    ouroboros::writer writer;
+    auto config_result =
+        writer.configure(std::span<uint8_t>(shm_file.data(), shm_file.size()), chunk_target_size,
+                         chunk_count);
     if (!config_result.has_value())
     {
         std::cerr << "Error: Failed to configure shared memory writer: "
@@ -213,7 +228,7 @@ auto main(int argc, char* argv[]) -> int
     // Print reader information in easily parseable JSON format
     std::cout << "{\n";
     std::cout << "  \"shm_name\": \"" << shm_name << "\",\n";
-    std::cout << "  \"buffer_size\": " << writer.buffer_size() << ",\n";
+    std::cout << "  \"buffer_size\": " << shm_file.size() << ",\n";
     std::cout << "  \"chunk_target_size\": " << writer.chunk_target_size()
               << ",\n";
     std::cout << "  \"chunk_count\": " << writer.chunk_count() << ",\n";
