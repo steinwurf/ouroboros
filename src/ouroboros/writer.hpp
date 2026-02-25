@@ -357,12 +357,9 @@ public:
         detail::atomic::store_release(header, total_entry_size);
 
         // Write entry payload
-        std::copy(
-            entry.begin(), entry.end(),
-            m_buffer
-                .subspan(m_offset + detail::buffer_format::entry_header_size,
-                         entry.size())
-                .begin());
+        std::memcpy(m_buffer.data() + m_offset +
+                        detail::buffer_format::entry_header_size,
+                    entry.data(), entry.size());
 
         // Update state
         m_total_entries_written++;

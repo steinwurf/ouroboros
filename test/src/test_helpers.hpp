@@ -8,7 +8,9 @@
 #include <string>
 #include <vector>
 
-#ifdef _WIN32
+#include <platform/config.hpp>
+
+#ifdef PLATFORM_WINDOWS
 #include <process.h>
 #else
 #include <unistd.h>

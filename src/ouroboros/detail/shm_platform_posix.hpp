@@ -3,16 +3,16 @@
 
 #pragma once
 
+#include <cstdint>
 #include <fcntl.h>
+#include <string>
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
+#include <platform/config.hpp>
 #include <tl/expected.hpp>
 #include <verify/verify.hpp>
-
-#include <cstdint>
-#include <string>
 
 #include "../error_code.hpp"
 
@@ -43,6 +43,33 @@ struct shm_mapping
     bool created = false; ///< true if newly created, false if opened existing
 };
 
+/// Try to reserve backing storage for a shared-memory object.
+///
+/// On Linux (except Android), this calls `posix_fallocate()` and returns
+/// `true` only when reservation succeeds. On other POSIX platforms this is a
+/// no-op and returns `true` to keep behavior portable.
+///
+/// @param fd File descriptor for the shared-memory object
+/// @param size Requested size in bytes
+/// @return `true` when backing storage is considered reserved
+inline auto try_reserve_backing_with_posix_fallocate(int fd,
+                                                     std::size_t size) -> bool
+{
+#if defined(PLATFORM_LINUX) && !defined(PLATFORM_ANDROID)
+    if (fd == -1 || size == 0)
+    {
+        return false;
+    }
+
+    const int result = posix_fallocate(fd, 0, static_cast<off_t>(size));
+    return result == 0;
+#else
+    (void)fd;
+    (void)size;
+    return true;
+#endif
+}
+
 /// Create or open and map a shared memory segment for writing (POSIX
 /// implementation)
 ///
@@ -63,16 +90,26 @@ inline auto create_or_open_and_map_shm(const std::string& name,
         // Successfully created a new segment
         if (ftruncate(fd, static_cast<off_t>(size)) == -1)
         {
+            // Failed to truncate the shared memory segment
             close(fd);
             shm_unlink(name.c_str());
             return tl::make_unexpected(make_error_code(
                 ouroboros::error::shared_memory_truncate_failed));
         }
 
+        int mmap_flags = MAP_SHARED;
+#ifdef MAP_POPULATE
+        // Best-effort prefault: ask the kernel to populate page tables now.
+        // This can reduce first-access page faults and latency spikes after
+        // mapping. It is guarded because MAP_POPULATE is not available on all
+        // POSIX platforms.
+        mmap_flags |= MAP_POPULATE;
+#endif
         void* ptr =
-            mmap(nullptr, size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+            mmap(nullptr, size, PROT_READ | PROT_WRITE, mmap_flags, fd, 0);
         if (ptr == MAP_FAILED)
         {
+            // Failed to map the shared memory segment
             close(fd);
             shm_unlink(name.c_str());
             return tl::make_unexpected(
@@ -81,6 +118,15 @@ inline auto create_or_open_and_map_shm(const std::string& name,
 
         VERIFY(reinterpret_cast<uintptr_t>(ptr) % 8 == 0,
                "Mapped shared memory is not 8-byte aligned");
+
+        if (!try_reserve_backing_with_posix_fallocate(fd, size))
+        {
+            munmap(ptr, size);
+            close(fd);
+            shm_unlink(name.c_str());
+            return tl::make_unexpected(make_error_code(
+                ouroboros::error::shared_memory_backing_allocation_failed));
+        }
 
         shm_handle handle;
         handle.fd = fd;
