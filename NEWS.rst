@@ -6,6 +6,10 @@ every change, see the Git log.
 
 Latest
 ------
+* tbd
+
+2.0.0
+-----
 * Major: Reworked the shared-memory C++ API to separate mapping ownership from
   log protocol logic. Added `shm_file` for shared-memory lifecycle and
   access (`data() const`/`data()`), and removed `shm_log_reader` and
