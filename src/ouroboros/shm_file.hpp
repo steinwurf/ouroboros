@@ -6,8 +6,8 @@
 #include <tl/expected.hpp>
 
 #include <string>
-#include <type_traits>
 #include <tuple>
+#include <type_traits>
 #include <utility>
 
 #include "detail/span.hpp"
@@ -37,8 +37,8 @@ public:
     }
 
     shm_file(shm_file&& other) noexcept :
-        m_name(std::move(other.m_name)),
-        m_handle(other.m_handle), m_ptr(other.m_ptr), m_size(other.m_size),
+        m_name(std::move(other.m_name)), m_handle(other.m_handle),
+        m_ptr(other.m_ptr), m_size(other.m_size),
         m_should_unlink(other.m_should_unlink)
     {
         other.m_handle = shm_handle{};

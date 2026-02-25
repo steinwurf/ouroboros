@@ -10,11 +10,11 @@
 #include <atomic>
 #include <chrono>
 #include <gtest/gtest.h>
-#include <tl/expected.hpp>
 #include <mutex>
 #include <set>
 #include <string>
 #include <thread>
+#include <tl/expected.hpp>
 #include <vector>
 
 #include "test_helpers.hpp"
@@ -37,12 +37,13 @@ auto configure_writer(rw_shm_file& shm_file, ouroboros::writer& writer,
     auto shm_result = shm_file.open_or_create(shm_name, required_size, true);
     if (!shm_result.has_value())
     {
-        return tl::make_unexpected(ouroboros::configure_error{
-            shm_result.error()});
+        return tl::make_unexpected(
+            ouroboros::configure_error{shm_result.error()});
     }
 
-    return writer.configure(std::span<uint8_t>(shm_file.data(), shm_file.size()), chunk_target_size,
-                            chunk_count);
+    return writer.configure(
+        std::span<uint8_t>(shm_file.data(), shm_file.size()), chunk_target_size,
+        chunk_count);
 }
 
 auto configure_reader(ro_shm_file& shm_file, ouroboros::reader& reader,
@@ -54,7 +55,8 @@ auto configure_reader(ro_shm_file& shm_file, ouroboros::reader& reader,
     {
         return tl::make_unexpected(shm_result.error());
     }
-    return reader.configure(std::span<const uint8_t>(shm_file.data(), shm_file.size()));
+    return reader.configure(
+        std::span<const uint8_t>(shm_file.data(), shm_file.size()));
 }
 } // namespace
 
@@ -66,9 +68,8 @@ TEST(test_shm_threaded, single_writer_single_reader)
 
     rw_shm_file writer_shm;
     ouroboros::writer writer;
-    auto writer_result =
-        configure_writer(writer_shm, writer, shm_name, chunk_target_size,
-                         chunk_count);
+    auto writer_result = configure_writer(writer_shm, writer, shm_name,
+                                          chunk_target_size, chunk_count);
     ASSERT_TRUE(writer_result.has_value());
 
     // Synchronization
@@ -164,9 +165,8 @@ TEST(test_shm_threaded, single_writer_multiple_readers)
 
     rw_shm_file writer_shm;
     ouroboros::writer writer;
-    auto writer_result =
-        configure_writer(writer_shm, writer, shm_name, chunk_target_size,
-                         chunk_count);
+    auto writer_result = configure_writer(writer_shm, writer, shm_name,
+                                          chunk_target_size, chunk_count);
     ASSERT_TRUE(writer_result.has_value());
 
     // Test parameters
@@ -278,9 +278,8 @@ TEST(test_shm_threaded, multi_threaded_with_wraps)
 
     rw_shm_file writer_shm;
     ouroboros::writer writer;
-    auto writer_result =
-        configure_writer(writer_shm, writer, shm_name, chunk_target_size,
-                         chunk_count);
+    auto writer_result = configure_writer(writer_shm, writer, shm_name,
+                                          chunk_target_size, chunk_count);
     ASSERT_TRUE(writer_result.has_value());
 
     // Test parameters
@@ -432,9 +431,8 @@ TEST(test_shm_threaded, concurrent_readers_different_starting_points)
 
     rw_shm_file writer_shm;
     ouroboros::writer writer;
-    auto writer_result =
-        configure_writer(writer_shm, writer, shm_name, chunk_target_size,
-                         chunk_count);
+    auto writer_result = configure_writer(writer_shm, writer, shm_name,
+                                          chunk_target_size, chunk_count);
     ASSERT_TRUE(writer_result.has_value());
 
     // Write some initial entries
@@ -528,9 +526,8 @@ TEST(test_shm_threaded,
 
     rw_shm_file writer_shm;
     ouroboros::writer writer;
-    auto writer_result =
-        configure_writer(writer_shm, writer, shm_name, chunk_target_size,
-                         chunk_count);
+    auto writer_result = configure_writer(writer_shm, writer, shm_name,
+                                          chunk_target_size, chunk_count);
     ASSERT_TRUE(writer_result.has_value())
         << "Writer configuration failed: " << writer_result.error().message();
 
@@ -742,9 +739,8 @@ TEST(test_shm_threaded, maximum_throughput)
 
     rw_shm_file writer_shm;
     ouroboros::writer writer;
-    auto writer_result =
-        configure_writer(writer_shm, writer, shm_name, chunk_target_size,
-                         chunk_count);
+    auto writer_result = configure_writer(writer_shm, writer, shm_name,
+                                          chunk_target_size, chunk_count);
     ASSERT_TRUE(writer_result.has_value())
         << "Writer configuration failed: " << writer_result.error().message();
 

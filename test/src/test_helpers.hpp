@@ -31,8 +31,8 @@ inline auto create_aligned_buffer(std::size_t size) -> std::vector<uint8_t>
 
 /// Helper to generate a string entry consisting of the entry_counter followed
 /// by a random number of characters to reach target size
-inline auto generate_entry(std::size_t entry_counter, std::size_t target_size)
-    -> std::string
+inline auto generate_entry(std::size_t entry_counter,
+                           std::size_t target_size) -> std::string
 {
     std::string entry = std::to_string(entry_counter);
     while (entry.size() < target_size)

@@ -215,8 +215,8 @@ auto main(int argc, char* argv[]) -> int
 
     ouroboros::writer writer;
     auto config_result =
-        writer.configure(std::span<uint8_t>(shm_file.data(), shm_file.size()), chunk_target_size,
-                         chunk_count);
+        writer.configure(std::span<uint8_t>(shm_file.data(), shm_file.size()),
+                         chunk_target_size, chunk_count);
     if (!config_result.has_value())
     {
         std::cerr << "Error: Failed to configure shared memory writer: "

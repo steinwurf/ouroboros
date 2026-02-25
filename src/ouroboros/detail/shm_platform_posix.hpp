@@ -43,9 +43,9 @@ struct shm_mapping
     bool created = false; ///< true if newly created, false if opened existing
 };
 
-inline auto validate_backing_allocation_with_posix_fallocate(int fd,
-                                                             std::size_t size)
-    -> bool
+inline auto
+validate_backing_allocation_with_posix_fallocate(int fd,
+                                                 std::size_t size) -> bool
 {
 #if defined(PLATFORM_LINUX) && !defined(PLATFORM_ANDROID)
     if (fd == -1 || size == 0)

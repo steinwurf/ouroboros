@@ -40,9 +40,9 @@ auto main(int argc, char* argv[]) -> int
     }
 
     ouroboros::reader reader;
-    auto config_result =
-        reader.configure(std::span<const uint8_t>(shm_file.data(), shm_file.size()),
-                         ouroboros::reader::read_strategy::from_lowest);
+    auto config_result = reader.configure(
+        std::span<const uint8_t>(shm_file.data(), shm_file.size()),
+        ouroboros::reader::read_strategy::from_lowest);
     if (!config_result.has_value())
     {
         std::cerr << "Error: Failed to configure reader: "
