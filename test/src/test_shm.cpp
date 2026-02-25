@@ -253,6 +253,7 @@ TEST(test_shm, writer_finish_reader_reports_finished)
 
     writer_shm.unlink();
     writer_shm = rw_shm_file{};
+    reader_shm = ro_shm_file{};
 
     ro_shm_file reader2_shm;
     ouroboros::reader reader2;
