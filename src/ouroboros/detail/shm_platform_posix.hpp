@@ -43,9 +43,17 @@ struct shm_mapping
     bool created = false; ///< true if newly created, false if opened existing
 };
 
-inline auto
-validate_backing_allocation_with_posix_fallocate(int fd,
-                                                 std::size_t size) -> bool
+/// Try to reserve backing storage for a shared-memory object.
+///
+/// On Linux (except Android), this calls `posix_fallocate()` and returns
+/// `true` only when reservation succeeds. On other POSIX platforms this is a
+/// no-op and returns `true` to keep behavior portable.
+///
+/// @param fd File descriptor for the shared-memory object
+/// @param size Requested size in bytes
+/// @return `true` when backing storage is considered reserved
+inline auto try_reserve_backing_with_posix_fallocate(int fd, std::size_t size)
+    -> bool
 {
 #if defined(PLATFORM_LINUX) && !defined(PLATFORM_ANDROID)
     if (fd == -1 || size == 0)
@@ -91,6 +99,10 @@ inline auto create_or_open_and_map_shm(const std::string& name,
 
         int mmap_flags = MAP_SHARED;
 #ifdef MAP_POPULATE
+        // Best-effort prefault: ask the kernel to populate page tables now.
+        // This can reduce first-access page faults and latency spikes after
+        // mapping. It is guarded because MAP_POPULATE is not available on all
+        // POSIX platforms.
         mmap_flags |= MAP_POPULATE;
 #endif
         void* ptr =
@@ -107,7 +119,7 @@ inline auto create_or_open_and_map_shm(const std::string& name,
         VERIFY(reinterpret_cast<uintptr_t>(ptr) % 8 == 0,
                "Mapped shared memory is not 8-byte aligned");
 
-        if (!validate_backing_allocation_with_posix_fallocate(fd, size))
+        if (!try_reserve_backing_with_posix_fallocate(fd, size))
         {
             munmap(ptr, size);
             close(fd);
