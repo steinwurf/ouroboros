@@ -3,7 +3,9 @@
 
 #pragma once
 
-#if !defined(_WIN32)
+#include <platform/config.hpp>
+
+#ifndef PLATFORM_WINDOWS
 #error "shm_platform_windows.hpp included on non-Windows platform"
 #endif
 

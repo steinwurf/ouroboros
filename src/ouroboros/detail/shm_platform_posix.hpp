@@ -3,16 +3,16 @@
 
 #pragma once
 
+#include <cstdint>
 #include <fcntl.h>
+#include <string>
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
+#include <platform/config.hpp>
 #include <tl/expected.hpp>
 #include <verify/verify.hpp>
-
-#include <cstdint>
-#include <string>
 
 #include "../error_code.hpp"
 
@@ -47,6 +47,7 @@ inline auto validate_backing_allocation_with_posix_fallocate(int fd,
                                                              std::size_t size)
     -> bool
 {
+#if defined(PLATFORM_LINUX) && !defined(PLATFORM_ANDROID)
     if (fd == -1 || size == 0)
     {
         return false;
@@ -54,6 +55,11 @@ inline auto validate_backing_allocation_with_posix_fallocate(int fd,
 
     const int result = posix_fallocate(fd, 0, static_cast<off_t>(size));
     return result == 0;
+#else
+    (void)fd;
+    (void)size;
+    return true;
+#endif
 }
 
 /// Create or open and map a shared memory segment for writing (POSIX
@@ -87,8 +93,8 @@ inline auto create_or_open_and_map_shm(const std::string& name,
 #ifdef MAP_POPULATE
         mmap_flags |= MAP_POPULATE;
 #endif
-        void* ptr = mmap(nullptr, size, PROT_READ | PROT_WRITE, mmap_flags, fd,
-                         0);
+        void* ptr =
+            mmap(nullptr, size, PROT_READ | PROT_WRITE, mmap_flags, fd, 0);
         if (ptr == MAP_FAILED)
         {
             // Failed to map the shared memory segment
@@ -123,10 +129,10 @@ inline auto create_or_open_and_map_shm(const std::string& name,
     }
 
     // Segment already exists - open it for read-write
-    fd= shm_open(name.c_str(), O_RDWR, 0666);
+    fd = shm_open(name.c_str(), O_RDWR, 0666);
     if (fd == -1)
     {
-         if (errno == ENOENT)
+        if (errno == ENOENT)
         {
             return tl::make_unexpected(
                 make_error_code(ouroboros::error::shared_memory_not_found));

@@ -24,7 +24,7 @@ namespace atomic
 /// replaced with std::atomic_ref for better clarity and maintainability.
 
 // Forward declarations for Windows implementation helpers
-#if defined(PLATFORM_WINDOWS_64)
+#ifdef PLATFORM_WINDOWS_64
 namespace impl
 {
 std::uint32_t load_acquire_impl_u32(const std::uint32_t* p) noexcept;
