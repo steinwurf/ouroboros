@@ -52,8 +52,8 @@ struct shm_mapping
 /// @param fd File descriptor for the shared-memory object
 /// @param size Requested size in bytes
 /// @return `true` when backing storage is considered reserved
-inline auto try_reserve_backing_with_posix_fallocate(int fd, std::size_t size)
-    -> bool
+inline auto try_reserve_backing_with_posix_fallocate(int fd,
+                                                     std::size_t size) -> bool
 {
 #if defined(PLATFORM_LINUX) && !defined(PLATFORM_ANDROID)
     if (fd == -1 || size == 0)
