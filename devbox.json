@@ -1,13 +1,26 @@
 {
   "$schema": "https://raw.githubusercontent.com/jetify-com/devbox/0.16.0/.schema/devbox.schema.json",
   "packages": [
-    "clang_18@18.1.8"
+    "zig_0_13@latest",
+    "python@3.14.0",
+    "cmake@3.28.3",
+    "ninja@1.11.1",
+    "python312Packages.pip@latest",
+    "clang_18@18.1.8",
+    "gcc@13.3.0"
   ],
   "shell": {
     "init_hook": [
       "echo 'Welcome to devbox!' > /dev/null"
     ],
     "scripts": {
+      "configure": [
+        "python3 waf clean --no_resolve",
+        "python3 waf configure \"$@\""
+      ],
+      "build": [
+        "python3 waf build \"$@\""
+      ],
       "format": [
         "find ./test ./src ./tools ./benchmark \\( -iname '*.c' -o -iname '*.h' -o -iname '*.cpp' -o -iname '*.hpp' \\) -print0 | xargs -0 clang-format -i"
       ]
