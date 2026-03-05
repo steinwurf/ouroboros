@@ -8,35 +8,20 @@
 #include <fstream>
 #include <iostream>
 #include <string>
-#include <vector>
 
 auto main(int argc, char* argv[]) -> int
 {
-    CLI::App app{"Dump log entries from shared memory or a persistent binary "
-                 "file starting from the lowest entry. Either --name or --bin "
-                 "must be provided, but not both."};
+    CLI::App app{"Dump shared memory log entries starting from lowest token"};
 
     std::string shm_name;
-    std::string bin_path;
     std::string output_file;
 
-    app.add_option("--name", shm_name, "Shared memory name");
-    app.add_option("--bin", bin_path, "Path to a persistent binary file");
+    app.add_option("--name", shm_name, "Shared memory name")->required();
     app.add_option("--output", output_file, "Output file path")->required();
 
     try
     {
         app.parse(argc, argv);
-
-        // Manual Exclusivity
-        bool has_shm = !shm_name.empty();
-        bool has_bin = !bin_path.empty();
-
-        if (has_shm == has_bin) // Both true or both false
-        {
-            throw CLI::ValidationError(
-                "Exactly one of --name or --bin must be provided.");
-        }
     }
     catch (const CLI::ParseError& e)
     {
@@ -44,54 +29,20 @@ auto main(int argc, char* argv[]) -> int
         return app.exit(e);
     }
 
-    std::vector<uint8_t> file_buffer;
+    // Configure reader with from_lowest strategy
     ouroboros::shm_file<ouroboros::shm_access::read_only> shm_file;
-
-    const uint8_t* data_ptr = nullptr;
-    std::size_t data_size = 0;
-
-    if (!bin_path.empty())
+    auto shm_result = shm_file.open(shm_name);
+    if (!shm_result.has_value())
     {
-        std::ifstream file(bin_path, std::ios::binary | std::ios::ate);
-        if (!file)
-        {
-            std::cerr << "Error: Could not open binary file: " << bin_path
-                      << "\n";
-            return 1;
-        }
-
-        std::streamsize size = file.tellg();
-        file.seekg(0, std::ios::beg);
-        file_buffer.resize(static_cast<std::size_t>(size));
-
-        if (!file.read(reinterpret_cast<char*>(file_buffer.data()), size))
-        {
-            std::cerr << "Error: Failed to read binary file content\n";
-            return 1;
-        }
-        data_ptr = file_buffer.data();
-        data_size = file_buffer.size();
+        std::cerr << "Error: Failed to open shared memory: "
+                  << shm_result.error().message() << "\n";
+        return 1;
     }
-    else
-    {
-        auto shm_result = shm_file.open(shm_name);
-        if (!shm_result.has_value())
-        {
-            std::cerr << "Error: Failed to open shared memory: "
-                      << shm_result.error().message() << "\n";
-            return 1;
-        }
-        data_ptr = shm_file.data();
-        data_size = shm_file.size();
-    }
-
-    // Configure the reader with from_lowest strategy to read all entries from
-    // the beginning
 
     ouroboros::reader reader;
     auto config_result = reader.configure(
-        {data_ptr, data_size}, ouroboros::reader::read_strategy::from_lowest);
-
+        std::span<const uint8_t>(shm_file.data(), shm_file.size()),
+        ouroboros::reader::read_strategy::from_lowest);
     if (!config_result.has_value())
     {
         std::cerr << "Error: Failed to configure reader: "
@@ -99,6 +50,7 @@ auto main(int argc, char* argv[]) -> int
         return 1;
     }
 
+    // Open output file
     std::ofstream out_file(output_file);
     if (!out_file.is_open())
     {
@@ -114,6 +66,7 @@ auto main(int argc, char* argv[]) -> int
         auto entry_result = reader.read_next();
         if (!entry_result.has_value())
         {
+            // No more data available (normal end of reading)
             break;
         }
 
@@ -123,5 +76,6 @@ auto main(int argc, char* argv[]) -> int
     }
 
     std::cerr << "Dumped " << entries_read << " entries\n";
+
     return 0;
 }
