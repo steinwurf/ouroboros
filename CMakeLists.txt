@@ -103,6 +103,9 @@ target_include_directories(ouroboros_shm_dumper PRIVATE
 set_property(TARGET ouroboros_shm_dumper PROPERTY CXX_STANDARD 17)
 set_property(TARGET ouroboros_shm_dumper PROPERTY CXX_EXTENSIONS OFF)
 
+# This tells CMake to include this target in the default build
+set_target_properties(ouroboros_shm_dumper PROPERTIES EXCLUDE_FROM_ALL FALSE)
+
 # Set output directory to bin/
 set_target_properties(ouroboros_shm_dumper PROPERTIES
 RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
