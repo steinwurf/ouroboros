@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include <CLI/CLI.hpp>
+#include <cstdint>
 #include <ouroboros/reader.hpp>
 #include <ouroboros/shm_file.hpp>
 
@@ -48,7 +49,7 @@ auto main(int argc, char* argv[]) -> int
     ouroboros::shm_file<ouroboros::shm_access::read_only> shm_file;
 
     const uint8_t* data_ptr = nullptr;
-    std::size_t data_size = 0;
+    std::size_t data_size = -1;
 
     if (!bin_path.empty())
     {
@@ -84,6 +85,8 @@ auto main(int argc, char* argv[]) -> int
         data_ptr = shm_file.data();
         data_size = shm_file.size();
     }
+    VERIFY(data_ptr != nullptr && data_size > 0,
+           "Data pointer and size must be set");
 
     // Configure the reader with from_lowest strategy to read all entries from
     // the beginning
