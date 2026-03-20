@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.12)
-project(ouroboros VERSION 2.0.0)
+project(ouroboros VERSION 3.0.0)
 
 find_package(Python COMPONENTS Interpreter)
 
