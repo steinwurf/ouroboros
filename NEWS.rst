@@ -6,6 +6,7 @@ every change, see the Git log.
 
 Latest
 ------
+* Major: Bump Cli11 to v2.6.2
 * Minor: Add ``--bin`` to dumper such that it can take raw binary snapshots of shared memory files, and make it such that dumper is always build by toplevel projects such that its available for usage in them. 
 
 2.0.0
