@@ -1,8 +1,8 @@
 // Copyright (c) 2026 Steinwurf ApS
 // SPDX-License-Identifier: MIT
 
-#include <ouroboros/reader.hpp>
 #include <ouroboros/detail/buffer_format.hpp>
+#include <ouroboros/reader.hpp>
 #include <ouroboros/writer.hpp>
 
 #include <ouroboros/error_code.hpp>
@@ -356,9 +356,9 @@ TEST(test_reader, from_lowest_skips_stale_chunk_with_uncommitted_entry_header)
     }
 
     ouroboros::reader reader;
-    auto result = reader.configure(
-        std::span<const uint8_t>(buffer_span),
-        ouroboros::reader::read_strategy::from_lowest);
+    auto result =
+        reader.configure(std::span<const uint8_t>(buffer_span),
+                         ouroboros::reader::read_strategy::from_lowest);
     ASSERT_TRUE(result.has_value());
 
     // Corrupt the oldest chunk's first entry header to look uncommitted while
@@ -366,10 +366,11 @@ TEST(test_reader, from_lowest_skips_stale_chunk_with_uncommitted_entry_header)
     // overwritten chunk table row.
     const auto stale_index = reader.current_chunk_index();
     const auto stale_offset = reader.chunk_offset(stale_index);
-    ASSERT_LT(stale_offset + ouroboros::detail::buffer_format::entry_header_size,
+    ASSERT_LT(stale_offset +
+                  ouroboros::detail::buffer_format::entry_header_size,
               buffer_span.size());
-    auto stale_header = ouroboros::detail::buffer_format::entry_header(
-        buffer_span.subspan(
+    auto stale_header =
+        ouroboros::detail::buffer_format::entry_header(buffer_span.subspan(
             stale_offset, ouroboros::detail::buffer_format::entry_header_size));
     *stale_header = 0;
 
