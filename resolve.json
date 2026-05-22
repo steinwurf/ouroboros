@@ -48,6 +48,15 @@
         ]
     },
     {
+        "name": "fmt",
+        "resolver": "git",
+        "method": "semver",
+        "major": 5,
+        "sources": [
+            "github.com/steinwurf/fmt.git"
+        ]
+    },
+    {
         "name": "gbenchmark-source",
         "internal": true,
         "resolver": "git",

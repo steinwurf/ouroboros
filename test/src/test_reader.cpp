@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include <ouroboros/reader.hpp>
+#include <ouroboros/detail/buffer_format.hpp>
 #include <ouroboros/writer.hpp>
 
 #include <ouroboros/error_code.hpp>
@@ -334,4 +335,52 @@ TEST(test_reader, handles_rapid_writes)
     EXPECT_GT(read_entries.size(), 0) << "Should read at least some entries";
     EXPECT_LE(read_entries.size(), num_entries)
         << "Should not read more entries than written";
+}
+
+TEST(test_reader, from_lowest_skips_stale_chunk_with_uncommitted_entry_header)
+{
+    constexpr std::size_t chunk_target_size = 128;
+    constexpr std::size_t chunk_count = 4;
+    auto buffer_size = ouroboros::detail::buffer_format::compute_buffer_size(
+        chunk_target_size, chunk_count);
+    auto buffer = create_aligned_buffer(buffer_size);
+    std::span<uint8_t> buffer_span(buffer);
+
+    ouroboros::writer writer;
+    writer.configure(buffer_span, chunk_target_size, chunk_count);
+
+    // Fill multiple chunks to ensure from_lowest has alternatives.
+    for (int i = 0; i < 24; ++i)
+    {
+        writer.write("entry-" + std::to_string(i));
+    }
+
+    ouroboros::reader reader;
+    auto result = reader.configure(
+        std::span<const uint8_t>(buffer_span),
+        ouroboros::reader::read_strategy::from_lowest);
+    ASSERT_TRUE(result.has_value());
+
+    // Corrupt the oldest chunk's first entry header to look uncommitted while
+    // keeping the chunk metadata committed. This mimics a stale/partially
+    // overwritten chunk table row.
+    const auto stale_index = reader.current_chunk_index();
+    const auto stale_offset = reader.chunk_offset(stale_index);
+    ASSERT_LT(stale_offset + ouroboros::detail::buffer_format::entry_header_size,
+              buffer_span.size());
+    auto stale_header = ouroboros::detail::buffer_format::entry_header(
+        buffer_span.subspan(
+            stale_offset, ouroboros::detail::buffer_format::entry_header_size));
+    *stale_header = 0;
+
+    ouroboros::reader reader_after_stale;
+    auto reconfigure = reader_after_stale.configure(
+        std::span<const uint8_t>(buffer_span),
+        ouroboros::reader::read_strategy::from_lowest);
+    ASSERT_TRUE(reconfigure.has_value());
+
+    auto first = reader_after_stale.read_next();
+    ASSERT_TRUE(first.has_value())
+        << "Reader should skip stale lowest-token chunk and continue";
+    EXPECT_FALSE(first->empty());
 }

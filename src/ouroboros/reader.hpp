@@ -521,6 +521,16 @@ public:
         return info.offset();
     }
 
+    /// Check if the chunk has a committed entry.
+    /// @param index The index of the chunk to check
+    /// @return true if the chunk has a committed entry, false if it does not
+    auto has_committed_entry(std::size_t index) const -> bool
+    {
+        auto info = get_chunk_info(m_buffer, index);
+        VERIFY(info.is_committed(), "Chunk is not committed", info);
+        return has_committed_entry(m_buffer, info);
+    }
+
     /// Check if the writer has finished writing.
     /// @return true if the writer has indicated it is finished (via special
     /// entry)
@@ -631,14 +641,27 @@ private:
                                              std::size_t chunk_count)
         -> chunk_info
     {
-        chunk_info best_chunk = get_chunk_info(buffer, 0);
-        for (std::size_t i = 1; i < chunk_count; ++i)
+        chunk_info best_chunk{};
+        chunk_info fallback_chunk{};
+        for (std::size_t i = 0; i < chunk_count; ++i)
         {
             const auto info = get_chunk_info(buffer, i);
             if (!info.is_committed())
             {
                 continue;
             }
+
+            if (!fallback_chunk.is_committed() ||
+                info.token() < fallback_chunk.token())
+            {
+                fallback_chunk = info;
+            }
+
+            if (!has_committed_entry(buffer, info))
+            {
+                continue;
+            }
+
             if (!best_chunk.is_committed())
             {
                 best_chunk = info;
@@ -649,7 +672,33 @@ private:
                 best_chunk = info;
             }
         }
-        return best_chunk;
+        if (best_chunk.is_committed())
+        {
+            return best_chunk;
+        }
+
+        // If all committed chunks currently point to uncommitted entry headers,
+        // preserve previous behavior by returning the lowest committed chunk.
+        return fallback_chunk;
+    }
+
+    static auto has_committed_entry(std::span<const uint8_t> buffer,
+                                    const chunk_info& info) -> bool
+    {
+        VERIFY(info.is_committed(), "Chunk is not committed", info);
+
+        const auto offset = info.offset();
+        if (offset + detail::buffer_format::entry_header_size > buffer.size())
+        {
+            // The chunk offset is beyond the buffer size. This should not
+            // happen.
+            return false;
+        }
+
+        const auto header = detail::buffer_format::entry_header(
+            buffer.subspan(offset, detail::buffer_format::entry_header_size));
+        const auto length_with_flag = detail::atomic::load_acquire(header);
+        return detail::buffer_format::is_committed(length_with_flag);
     }
 
 private:

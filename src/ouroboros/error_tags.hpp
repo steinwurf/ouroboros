@@ -23,6 +23,7 @@ ERROR_TAG(entry_not_valid, "Entry not valid.")
 ERROR_TAG(writer_finished, "Writer has finished; no more data will be written.")
 ERROR_TAG(buffer_restarted, "Buffer was restarted; reader must reconfigure.")
 ERROR_TAG(shared_memory_exists, "Shared memory segment already exists.")
+ERROR_TAG(shared_memory_size_mismatch, "Shared memory segment size mismatch.")
 ERROR_TAG(shared_memory_create_failed,
           "Failed to create shared memory segment.")
 ERROR_TAG(shared_memory_open_failed, "Failed to open shared memory segment.")

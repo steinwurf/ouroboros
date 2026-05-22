@@ -17,6 +17,18 @@
         "sha1": "5078750ed20c6d6323d27ed96fb2ddebc43bb247",
         "source": "github.com/TartanLlama/expected.git"
     },
+    "fmt": {
+        "commit_id": "3fba272021d507b310f4d059e3a4c1883b65fbc4",
+        "resolver_info": "5.0.1",
+        "sha1": "160978c7e6571cc06d6c8a590e5e0c4f3c826fba",
+        "source": "github.com/steinwurf/fmt.git"
+    },
+    "fmt-source": {
+        "commit_id": "0c9fce2ffefecfdce794e1859584e25877b7b592",
+        "resolver_info": "11.0.2",
+        "sha1": "f39ff778b3283f543cdfc9b1662ec101c453efce",
+        "source": "github.com/fmtlib/fmt.git"
+    },
     "gbenchmark-source": {
         "commit_id": "344117638c8ff7e239044fd0fa7085839fc03021",
         "resolver_info": "v1.8.3",
@@ -48,14 +60,14 @@
         "source": "github.com/steinwurf/platform.git"
     },
     "toolchains": {
-        "commit_id": "14f038b2718bc7c1728ef875066fef5de0d1f2a7",
-        "resolver_info": "1.0.8",
+        "commit_id": "655f6d386f0a9d4a0038388fdccb5fbfe463f1b0",
+        "resolver_info": "1.1.0",
         "sha1": "443cb23b0570dffd39283d8679ec393ed809302f",
         "source": "github.com/steinwurf/cmake-toolchains.git"
     },
     "verify": {
-        "commit_id": "27b970938379a5a1bc1c9f4377c2686943763893",
-        "resolver_info": "6.0.4",
+        "commit_id": "42e744725e5a9f9e303da4b53446030a1a20a321",
+        "resolver_info": "6.1.0",
         "sha1": "fed379602b6ea7bd611fc249daffa11b9e593800",
         "source": "github.com/steinwurf/verify.git"
     },

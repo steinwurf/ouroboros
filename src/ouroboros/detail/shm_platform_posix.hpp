@@ -52,8 +52,8 @@ struct shm_mapping
 /// @param fd File descriptor for the shared-memory object
 /// @param size Requested size in bytes
 /// @return `true` when backing storage is considered reserved
-inline auto try_reserve_backing_with_posix_fallocate(int fd,
-                                                     std::size_t size) -> bool
+inline auto try_reserve_backing_with_posix_fallocate(int fd, std::size_t size)
+    -> bool
 {
 #if defined(PLATFORM_LINUX) && !defined(PLATFORM_ANDROID)
     if (fd == -1 || size == 0)
@@ -174,6 +174,13 @@ inline auto create_or_open_and_map_shm(const std::string& name,
 
     VERIFY(reinterpret_cast<uintptr_t>(ptr) % 8 == 0,
            "Mapped shared memory is not 8-byte aligned");
+
+    if (existing_size != size)
+    {
+        close(fd);
+        return tl::make_unexpected(
+            make_error_code(ouroboros::error::shared_memory_size_mismatch));
+    }
 
     shm_handle handle;
     handle.fd = fd;

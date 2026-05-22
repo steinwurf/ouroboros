@@ -3,12 +3,13 @@
 
 #include <CLI/CLI.hpp>
 #include <cstdint>
+#include <fmt/color.h>
+#include <fmt/core.h>
 #include <ouroboros/error_code.hpp>
 #include <ouroboros/reader.hpp>
 #include <ouroboros/shm_file.hpp>
 
 #include <fstream>
-#include <iomanip>
 #include <iostream>
 #include <string>
 #include <vector>
@@ -127,33 +128,46 @@ auto main(int argc, char* argv[]) -> int
 
     if (verbose)
     {
-        std::cerr << "Reader configured successfully\n";
-        std::cerr << "  Chunk count: " << reader.chunk_count() << "\n";
-        std::cerr << "  Buffer ID: " << reader.buffer_id() << "\n";
-        std::cerr << "  Current chunk index: " << reader.current_chunk_index()
-                  << "\n";
+        fmt::print(stderr, "{}\n",
+                   fmt::styled("Reader Overview", fmt::emphasis::bold));
+        fmt::print(stderr, "  {:<22}{}\n", "Chunk count:",
+                   fmt::styled(fmt::format("{}", reader.chunk_count()),
+                               fmt::fg(fmt::terminal_color::bright_white)));
+        fmt::print(stderr, "  {:<22}{}", "Buffer ID:",
+                   fmt::styled(fmt::format("{}", reader.buffer_id()),
+                               fmt::fg(fmt::terminal_color::bright_white)));
+        fmt::print(stderr, "  {:<22}{}\n", "Current chunk index:",
+                   fmt::styled(fmt::format("{}", reader.current_chunk_index()),
+                               fmt::fg(fmt::terminal_color::bright_white)));
+        fmt::print(
+            stderr, "  {:<22}{}\n", "Current chunk token:",
+            fmt::styled(fmt::format("{}", reader.chunk_token(
+                                              reader.current_chunk_index())),
+                        fmt::fg(fmt::terminal_color::bright_white)));
 
         std::size_t committed_count = 0;
-        constexpr std::size_t chunks_per_row = 32;
-        std::cerr
-            << "  Chunk overview (C=committed, u=uncommitted, *=current):\n";
-        std::cerr << "    range";
-        std::cerr << "        state-map";
-        std::cerr << "                                                         "
-                     "token-range";
-        std::cerr << "           offset-range\n";
+        std::size_t committed_with_entries_count = 0;
+        constexpr std::size_t chunks_per_row = 64;
+        auto current_chunk_index = reader.current_chunk_index();
+        fmt::print(stderr, "{}\n",
+                   fmt::styled("  Chunk map", fmt::emphasis::bold));
+        fmt::print(
+            stderr, "    {} {}\n",
+            fmt::styled("C=committed", fmt::fg(fmt::terminal_color::green)),
+            fmt::styled("U=uncommitted", fmt::fg(fmt::terminal_color::yellow)));
+        fmt::print(stderr, "    {:<12} {:<65} {:<27} {}\n", "range",
+                   "state-map", "token-range", "offset-range");
 
         for (std::size_t row_begin = 0; row_begin < reader.chunk_count();
              row_begin += chunks_per_row)
         {
             auto row_end =
                 std::min(row_begin + chunks_per_row, reader.chunk_count());
-            auto first_token = reader.chunk_token(row_begin);
-            auto last_token = first_token;
-            auto first_offset = reader.chunk_offset(row_begin);
-            auto last_offset = first_offset;
+            bool has_committed_in_row = false;
+            std::size_t first_committed_index = 0;
+            std::size_t last_committed_index = 0;
             std::string state_map;
-            state_map.reserve((row_end - row_begin) * 2);
+            state_map.reserve(row_end - row_begin);
 
             for (std::size_t i = row_begin; i < row_end; ++i)
             {
@@ -161,34 +175,78 @@ auto main(int argc, char* argv[]) -> int
                 if (is_committed)
                 {
                     committed_count++;
+                    if (!has_committed_in_row)
+                    {
+                        first_committed_index = i;
+                        has_committed_in_row = true;
+                    }
+                    last_committed_index = i;
                 }
 
-                state_map.push_back(is_committed ? 'C' : 'u');
-                if (i == reader.current_chunk_index())
+                if (is_committed)
                 {
-                    state_map.push_back('*');
+                    auto has_committed_entry = reader.has_committed_entry(i);
+                    if (has_committed_entry)
+                    {
+                        state_map.push_back('C');
+                    }
+                    else
+                    {
+                        state_map.push_back('c');
+                    }
                 }
                 else
                 {
-                    state_map.push_back(' ');
-                }
-                if (is_committed)
-                {
-                    last_token = reader.chunk_token(i);
-                    last_offset = reader.chunk_offset(i);
+                    state_map.push_back('U');
                 }
             }
 
-            std::cerr << "    [" << std::setw(4) << row_begin << "-"
-                      << std::setw(4) << (row_end - 1) << "]  " << state_map
-                      << "  [" << first_token << " -> " << last_token << "]"
-                      << "    [" << first_offset << " -> " << last_offset << "]"
-                      << "\n";
+            std::string token_range = "[n/a -> n/a]";
+            std::string offset_range = "[n/a -> n/a]";
+
+            if (has_committed_in_row)
+            {
+                auto first_token = reader.chunk_token(first_committed_index);
+                auto last_token = reader.chunk_token(last_committed_index);
+                auto first_offset = reader.chunk_offset(first_committed_index);
+                auto last_offset = reader.chunk_offset(last_committed_index);
+                token_range =
+                    fmt::format("[{} -> {}]", first_token, last_token);
+                offset_range =
+                    fmt::format("[{} -> {}]", first_offset, last_offset);
+            }
+
+            fmt::print(stderr, "    [{:>4}-{:>4}]  ", row_begin, (row_end - 1));
+            for (std::size_t i = 0; i < state_map.size(); ++i)
+            {
+                auto absolute_index = row_begin + i;
+                auto style = fmt::fg(fmt::terminal_color::yellow);
+                if (std::tolower(state_map[i]) == 'c')
+                {
+                    style = fmt::fg(fmt::terminal_color::green);
+                }
+                if (absolute_index == current_chunk_index)
+                {
+                    style = fmt::fg(fmt::terminal_color::bright_green) |
+                            fmt::emphasis::bold;
+                }
+                fmt::print(stderr, "{}", fmt::styled(state_map[i], style));
+            }
+            fmt::print(stderr, "{: <{}}  {:<27} {}\n", "",
+                       chunks_per_row - state_map.size(), token_range,
+                       offset_range);
         }
 
         auto uncommitted_count = reader.chunk_count() - committed_count;
-        std::cerr << "  Chunks committed: " << committed_count
-                  << ", uncommitted: " << uncommitted_count << "\n";
+        fmt::print(
+            stderr, "\n  {} {}, {} {}\n",
+            fmt::styled("Chunks committed:",
+                        fmt::fg(fmt::terminal_color::green) |
+                            fmt::emphasis::bold),
+            committed_count,
+            fmt::styled("uncommitted:", fmt::fg(fmt::terminal_color::yellow) |
+                                            fmt::emphasis::bold),
+            uncommitted_count);
     }
 
     std::ofstream out_file(output_file);

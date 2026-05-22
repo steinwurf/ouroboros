@@ -155,10 +155,10 @@ public:
     ///          It will overwrite the values in the buffer header to the new
     ///          values and reset the current chunk index to 0.
     /// @return void on success, or an error_code indicating what failed.
-    auto
-    configure(std::span<uint8_t> buffer, std::size_t chunk_target_size,
-              std::size_t chunk_count, uint64_t buffer_id = 0,
-              bool force_init = false) -> tl::expected<void, configure_error>
+    auto configure(std::span<uint8_t> buffer, std::size_t chunk_target_size,
+                   std::size_t chunk_count, uint64_t buffer_id = 0,
+                   bool force_init = false)
+        -> tl::expected<void, configure_error>
     {
         VERIFY(buffer.data() != nullptr, "Buffer span must not be null!");
         VERIFY(buffer.size() > 0, "Buffer span must not be empty!");
@@ -233,6 +233,8 @@ public:
         // Zero out the first entry header
         std::memset(m_buffer.data() + m_offset, 0,
                     detail::buffer_format::entry_header_size);
+        // Publish an initial committed chunk so readers can attach and find a
+        // stable start offset; the first entry itself is still uncommitted.
         commit_chunk(m_buffer, m_current_chunk_index);
 
         return {};
@@ -497,10 +499,10 @@ private:
     ///         - resume_buffer_overflow: Buffer overflow while scanning
     ///         - resume_unexpected_wrap: Unexpected wrap entry found
     ///         - resume_writer_finished: Previous writer finished
-    static auto
-    try_resume(std::span<const uint8_t> buffer, std::size_t chunk_target_size,
-               std::size_t chunk_count,
-               uint64_t buffer_id) -> tl::expected<resume_info, configure_error>
+    static auto try_resume(std::span<const uint8_t> buffer,
+                           std::size_t chunk_target_size,
+                           std::size_t chunk_count, uint64_t buffer_id)
+        -> tl::expected<resume_info, configure_error>
     {
         VERIFY(detail::buffer_format::is_initialized(buffer),
                "Buffer is not initialized");

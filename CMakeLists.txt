@@ -41,6 +41,11 @@ if(NOT TARGET CLI11::CLI11)
   add_subdirectory("${STEINWURF_RESOLVE}/cli11-source" cli11 EXCLUDE_FROM_ALL)
 endif()
 
+# fmt dependency for dumper tool
+if(NOT TARGET steinwurf::fmt)
+  add_subdirectory("${STEINWURF_RESOLVE}/fmt" fmt EXCLUDE_FROM_ALL)
+endif()
+
 get_property(steinwurf_object_libraries GLOBAL
   PROPERTY steinwurf::object_libraries)
 
@@ -96,6 +101,7 @@ target_link_libraries(ouroboros_shm_dumper steinwurf::platform)
 target_link_libraries(ouroboros_shm_dumper CLI11::CLI11)
 target_link_libraries(ouroboros_shm_dumper steinwurf::verify)
 target_link_libraries(ouroboros_shm_dumper steinwurf::expected)
+target_link_libraries(ouroboros_shm_dumper steinwurf::fmt)
 target_include_directories(ouroboros_shm_dumper PRIVATE
 "${STEINWURF_RESOLVE}/cli11-source")
 
