@@ -8,6 +8,7 @@
 
 #include <cstdint>
 #include <cstring>
+#include <iostream>
 #include <string_view>
 
 #include "detail/atomic.hpp"
@@ -223,7 +224,7 @@ public:
         if (!start.is_committed())
         {
             return tl::make_unexpected(
-                make_error_code(ouroboros::error::no_data_available));
+                make_error_code(ouroboros::error::no_data_no_committed_chunk));
         }
 
         m_buffer = buffer;
@@ -281,8 +282,8 @@ public:
                 {
                     // Failed to jump to the first chunk. No more data
                     // available.
-                    return tl::make_unexpected(
-                        make_error_code(ouroboros::error::no_data_available));
+                    return tl::make_unexpected(make_error_code(
+                        ouroboros::error::no_data_wrap_wait_for_chunk));
                 }
             }
 
@@ -305,7 +306,7 @@ public:
                         // It wasn't which means that we must wait for the next
                         // chunk to be (re)written.
                         return tl::make_unexpected(make_error_code(
-                            ouroboros::error::no_data_available));
+                            ouroboros::error::no_data_next_chunk_not_newer));
                     }
                     set_current_chunk(next_chunk_info);
                 }
@@ -337,8 +338,8 @@ public:
                 if (!latest.is_committed())
                 {
                     // No more data available.
-                    return tl::make_unexpected(
-                        make_error_code(ouroboros::error::no_data_available));
+                    return tl::make_unexpected(make_error_code(
+                        ouroboros::error::no_data_no_committed_chunk));
                 }
 
                 if (latest.token() <= m_current_chunk.token())
@@ -346,8 +347,8 @@ public:
                     // The latest chunk is not newer than the current chunk.
                     // This means that the must wait for the next chunk to be
                     // (re)written.
-                    return tl::make_unexpected(
-                        make_error_code(ouroboros::error::no_data_available));
+                    return tl::make_unexpected(make_error_code(
+                        ouroboros::error::no_data_latest_chunk_not_newer));
                 }
 
                 // Move to the latest chunk.
@@ -359,8 +360,8 @@ public:
             if (!detail::buffer_format::is_committed(length_with_flag))
             {
                 // The entry is not committed. No data available.
-                return tl::make_unexpected(
-                    make_error_code(ouroboros::error::no_data_available));
+                return tl::make_unexpected(make_error_code(
+                    ouroboros::error::no_data_entry_uncommitted));
             }
 
             // Clear the commit flag and get the length of the entry.
@@ -372,8 +373,8 @@ public:
             {
                 // The entry length is 0 which means this entry is not yet
                 // written.
-                return tl::make_unexpected(
-                    make_error_code(ouroboros::error::no_data_available));
+                return tl::make_unexpected(make_error_code(
+                    ouroboros::error::no_data_entry_not_written));
             }
             else if (length == 1)
             {
@@ -384,8 +385,8 @@ public:
                 {
                     // Failed to jump to the first chunk. No more data
                     // available.
-                    return tl::make_unexpected(
-                        make_error_code(ouroboros::error::no_data_available));
+                    return tl::make_unexpected(make_error_code(
+                        ouroboros::error::no_data_wrap_wait_for_chunk));
                 }
 
                 continue;
@@ -475,9 +476,57 @@ public:
         return m_buffer_id;
     }
 
+    /// Get the total number of entries read by this reader instance.
+    /// @return The total count of entries successfully read (including those
+    /// that may have been invalidated by overwrites)
     auto total_entries_read() const -> std::size_t
     {
         return m_total_entries_read;
+    }
+
+    /// Get the index of the current chunk being read.
+    /// @return The zero-based index of the current chunk
+    auto current_chunk_index() const -> std::size_t
+    {
+        return m_current_chunk.index();
+    }
+
+    /// Check if the chunk is committed.
+    /// @param index The index of the chunk to check
+    /// @return true if the chunk is committed, false if it is not
+    auto is_chunk_committed(std::size_t index) const -> bool
+    {
+        auto info = get_chunk_info(m_buffer, index);
+        return info.is_committed();
+    }
+
+    /// Get the token of the chunk being read.
+    /// @param index The index of the chunk to get the token from
+    /// @return The token value of the chunk, representing the number of
+    ///         entries written before this chunk
+    auto chunk_token(std::size_t index) const -> uint64_t
+    {
+        auto info = get_chunk_info(m_buffer, index);
+        VERIFY(info.is_committed(), "Chunk is not committed", info);
+        return info.token();
+    }
+
+    /// Get the offset of the chunk being read.
+    /// @param index The index of the chunk to get the offset from
+    /// @return The byte offset in the buffer where the chunk's entries start
+    auto chunk_offset(std::size_t index) const -> uint64_t
+    {
+        auto info = get_chunk_info(m_buffer, index);
+        VERIFY(info.is_committed(), "Chunk is not committed", info);
+        return info.offset();
+    }
+
+    /// Check if the writer has finished writing.
+    /// @return true if the writer has indicated it is finished (via special
+    /// entry)
+    auto is_writer_finished() const -> bool
+    {
+        return m_writer_finished;
     }
 
 private:
@@ -526,8 +575,8 @@ private:
     }
 
     static auto find_chunk(std::span<const uint8_t> buffer,
-                           std::size_t chunk_count,
-                           read_strategy strategy) -> chunk_info
+                           std::size_t chunk_count, read_strategy strategy)
+        -> chunk_info
     {
         switch (strategy)
         {
@@ -552,9 +601,9 @@ private:
         return {};
     }
 
-    static auto
-    find_chunk_with_highest_token(std::span<const uint8_t> buffer,
-                                  std::size_t chunk_count) -> chunk_info
+    static auto find_chunk_with_highest_token(std::span<const uint8_t> buffer,
+                                              std::size_t chunk_count)
+        -> chunk_info
     {
         chunk_info best_chunk = get_chunk_info(buffer, 0);
         for (std::size_t i = 1; i < chunk_count; ++i)
@@ -578,9 +627,9 @@ private:
         return best_chunk;
     }
 
-    static auto
-    find_chunk_with_lowest_token(std::span<const uint8_t> buffer,
-                                 std::size_t chunk_count) -> chunk_info
+    static auto find_chunk_with_lowest_token(std::span<const uint8_t> buffer,
+                                             std::size_t chunk_count)
+        -> chunk_info
     {
         chunk_info best_chunk = get_chunk_info(buffer, 0);
         for (std::size_t i = 1; i < chunk_count; ++i)

@@ -60,7 +60,8 @@ TEST(test_reader, empty_buffer_handling)
     auto entry_result = reader.read_next_entry();
     ASSERT_FALSE(entry_result.has_value());
     EXPECT_EQ(entry_result.error(),
-              ouroboros::make_error_code(ouroboros::error::no_data_available));
+              ouroboros::make_error_code(
+                  ouroboros::error::no_data_entry_uncommitted));
 }
 
 TEST(test_reader, configure_invalid_magic)

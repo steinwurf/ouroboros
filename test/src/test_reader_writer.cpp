@@ -302,8 +302,8 @@ TEST(test_reader_writer, interleaved_operations)
     // Reader tries to read again - should fail
     auto entry4 = reader.read_next_entry();
     ASSERT_FALSE(entry4.has_value());
-    EXPECT_EQ(entry4.error(),
-              ouroboros::make_error_code(ouroboros::error::no_data_available));
+    EXPECT_EQ(entry4.error(), ouroboros::make_error_code(
+                                  ouroboros::error::no_data_entry_uncommitted));
 }
 
 TEST(test_reader_writer, writer_finish_reader_returns_writer_finished)

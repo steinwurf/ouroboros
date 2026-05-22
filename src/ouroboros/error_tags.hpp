@@ -7,7 +7,18 @@ ERROR_TAG(invalid_magic, "Invalid magic bytes.")
 ERROR_TAG(unsupported_version, "Unsupported version.")
 ERROR_TAG(invalid_chunk_count, "Invalid chunk count.")
 ERROR_TAG(buffer_too_small, "Buffer too small for chunks.")
-ERROR_TAG(no_data_available, "No data available to read.")
+ERROR_TAG(no_data_no_committed_chunk,
+          "No data available: no committed chunk found.")
+ERROR_TAG(no_data_wrap_wait_for_chunk,
+          "No data available: waiting for a newer chunk after wrap.")
+ERROR_TAG(no_data_next_chunk_not_newer,
+          "No data available: next chunk is not newer yet.")
+ERROR_TAG(no_data_latest_chunk_not_newer,
+          "No data available: latest chunk is not newer than current.")
+ERROR_TAG(no_data_entry_uncommitted,
+          "No data available: entry is not committed yet.")
+ERROR_TAG(no_data_entry_not_written,
+          "No data available: entry header is committed but length is zero.")
 ERROR_TAG(entry_not_valid, "Entry not valid.")
 ERROR_TAG(writer_finished, "Writer has finished; no more data will be written.")
 ERROR_TAG(buffer_restarted, "Buffer was restarted; reader must reconfigure.")
