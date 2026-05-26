@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <fmt/color.h>
 #include <fmt/core.h>
+#include <ouroboros/detail/buffer_format.hpp>
 #include <ouroboros/error_code.hpp>
 #include <ouroboros/reader.hpp>
 #include <ouroboros/shm_file.hpp>
@@ -13,6 +14,106 @@
 #include <iostream>
 #include <string>
 #include <vector>
+
+namespace
+{
+
+auto is_end_of_dump(const std::error_code& error) -> bool
+{
+    if (!error)
+    {
+        return false;
+    }
+
+    const auto code = static_cast<ouroboros::error>(error.value());
+    switch (code)
+    {
+    case ouroboros::error::no_data_no_committed_chunk:
+    case ouroboros::error::no_data_wrap_wait_for_chunk:
+    case ouroboros::error::no_data_next_chunk_not_newer:
+    case ouroboros::error::no_data_latest_chunk_not_newer:
+    case ouroboros::error::no_data_entry_uncommitted:
+    case ouroboros::error::no_data_entry_not_written:
+    case ouroboros::error::writer_finished:
+        return true;
+    default:
+        return false;
+    }
+}
+
+struct dump_stats
+{
+    std::size_t entries_dumped = 0;
+    uint64_t max_sequence_number = 0;
+    uint64_t max_chunk_token = 0;
+    std::size_t read_errors = 0;
+    uint64_t total_payload_bytes = 0;
+    uint64_t total_on_wire_bytes = 0;
+    bool writer_finished = false;
+    bool have_entry_sizes = false;
+    std::size_t min_entry_size = 0;
+    std::size_t max_entry_size = 0;
+    uint64_t entry_size_sum = 0;
+
+    void record_entry(std::size_t on_wire_size, uint64_t sequence_number,
+                      uint64_t chunk_token)
+    {
+        entries_dumped++;
+        max_sequence_number = std::max(max_sequence_number, sequence_number);
+        max_chunk_token = std::max(max_chunk_token, chunk_token);
+        total_on_wire_bytes += on_wire_size;
+        total_payload_bytes +=
+            on_wire_size - ouroboros::detail::buffer_format::entry_header_size;
+        entry_size_sum += on_wire_size;
+
+        if (!have_entry_sizes)
+        {
+            have_entry_sizes = true;
+            min_entry_size = on_wire_size;
+            max_entry_size = on_wire_size;
+        }
+        else
+        {
+            min_entry_size = std::min(min_entry_size, on_wire_size);
+            max_entry_size = std::max(max_entry_size, on_wire_size);
+        }
+    }
+};
+
+void print_dump_stats(const dump_stats& stats)
+{
+    fmt::print(stderr, "{}\n", fmt::styled("Statistics", fmt::emphasis::bold));
+    fmt::print(stderr, "  {:<28}{}\n", "Entries dumped:", stats.entries_dumped);
+    fmt::print(stderr, "  {:<28}{}\n",
+               "Max sequence number:", stats.max_sequence_number);
+    fmt::print(stderr, "  {:<28}{}\n",
+               "Max chunk token seen:", stats.max_chunk_token);
+
+    if (stats.have_entry_sizes)
+    {
+        const auto average_size = static_cast<double>(stats.entry_size_sum) /
+                                  static_cast<double>(stats.entries_dumped);
+        fmt::print(stderr, "  {:<28}{}\n",
+                   "Entry size (on-wire) min:", stats.min_entry_size);
+        fmt::print(stderr, "  {:<28}{:.1f}\n",
+                   "Entry size (on-wire) avg:", average_size);
+        fmt::print(stderr, "  {:<28}{}\n",
+                   "Entry size (on-wire) max:", stats.max_entry_size);
+    }
+
+    fmt::print(stderr, "  {:<28}{}\n",
+               "Total payload bytes:", stats.total_payload_bytes);
+    fmt::print(stderr, "  {:<28}{}\n",
+               "Total on-wire bytes:", stats.total_on_wire_bytes);
+    fmt::print(stderr, "  {:<28}{}\n",
+               "Writer finished marker:", stats.writer_finished ? "yes" : "no");
+    if (stats.read_errors > 0)
+    {
+        fmt::print(stderr, "  {:<28}{}\n", "Read errors:", stats.read_errors);
+    }
+}
+
+} // namespace
 
 auto main(int argc, char* argv[]) -> int
 {
@@ -133,7 +234,7 @@ auto main(int argc, char* argv[]) -> int
         fmt::print(stderr, "  {:<22}{}\n", "Chunk count:",
                    fmt::styled(fmt::format("{}", reader.chunk_count()),
                                fmt::fg(fmt::terminal_color::bright_white)));
-        fmt::print(stderr, "  {:<22}{}", "Buffer ID:",
+        fmt::print(stderr, "  {:<22}{}\n", "Buffer ID:",
                    fmt::styled(fmt::format("{}", reader.buffer_id()),
                                fmt::fg(fmt::terminal_color::bright_white)));
         fmt::print(stderr, "  {:<22}{}\n", "Current chunk index:",
@@ -144,10 +245,15 @@ auto main(int argc, char* argv[]) -> int
             fmt::styled(fmt::format("{}", reader.chunk_token(
                                               reader.current_chunk_index())),
                         fmt::fg(fmt::terminal_color::bright_white)));
+        fmt::print(
+            stderr, "  {:<22}{}\n", "Current chunk offset:",
+            fmt::styled(fmt::format("{}", reader.chunk_offset(
+                                              reader.current_chunk_index())),
+                        fmt::fg(fmt::terminal_color::bright_white)));
 
         std::size_t committed_count = 0;
         std::size_t committed_with_entries_count = 0;
-        constexpr std::size_t chunks_per_row = 64;
+        constexpr std::size_t chunks_per_row = 16;
         auto current_chunk_index = reader.current_chunk_index();
         fmt::print(stderr, "{}\n",
                    fmt::styled("  Chunk map", fmt::emphasis::bold));
@@ -188,6 +294,7 @@ auto main(int argc, char* argv[]) -> int
                     auto has_committed_entry = reader.has_committed_entry(i);
                     if (has_committed_entry)
                     {
+                        committed_with_entries_count++;
                         state_map.push_back('C');
                     }
                     else
@@ -239,11 +346,14 @@ auto main(int argc, char* argv[]) -> int
 
         auto uncommitted_count = reader.chunk_count() - committed_count;
         fmt::print(
-            stderr, "\n  {} {}, {} {}\n",
+            stderr, "\n  {} {}, {} {}, {} {}\n",
             fmt::styled("Chunks committed:",
                         fmt::fg(fmt::terminal_color::green) |
                             fmt::emphasis::bold),
             committed_count,
+            fmt::styled("with entries:", fmt::fg(fmt::terminal_color::green) |
+                                             fmt::emphasis::bold),
+            committed_with_entries_count,
             fmt::styled("uncommitted:", fmt::fg(fmt::terminal_color::yellow) |
                                             fmt::emphasis::bold),
             uncommitted_count);
@@ -257,26 +367,52 @@ auto main(int argc, char* argv[]) -> int
         return 1;
     }
 
-    // Read all entries and write them to the output file
-    std::size_t entries_read = 0;
+    dump_stats stats;
     while (true)
     {
-        auto entry_result = reader.read_next();
+        auto entry_result = reader.read_next_entry();
         if (!entry_result.has_value())
         {
-            if (verbose)
+            if (entry_result.error() ==
+                ouroboros::make_error_code(ouroboros::error::writer_finished))
             {
-                std::cerr << "Error reading entry: "
-                          << entry_result.error().message() << "\n";
+                stats.writer_finished = true;
+            }
+            else if (!is_end_of_dump(entry_result.error()))
+            {
+                stats.read_errors++;
+                if (verbose)
+                {
+                    std::cerr << "Error reading entry: "
+                              << entry_result.error().message() << "\n";
+                }
             }
             break;
         }
 
-        // Write entry as string to output file
-        out_file << entry_result.value() << "\n";
-        entries_read++;
+        const auto& entry = entry_result.value();
+        const std::size_t on_wire_size =
+            entry.data.size() +
+            ouroboros::detail::buffer_format::entry_header_size;
+
+        stats.record_entry(on_wire_size, entry.sequence_number,
+                           entry.chunk_token);
+        if (entry.is_valid())
+        {
+            out_file << entry.data << "\n";
+        }
+        else
+        {
+            std::cerr << "Warning: Entry is invalid, skipping\n";
+        }
     }
 
-    std::cerr << "Dumped " << entries_read << " entries\n";
+    if (verbose)
+    {
+        fmt::print(stderr, "\n");
+        print_dump_stats(stats);
+    }
+
+    std::cerr << "Dumped " << stats.entries_dumped << " entries\n";
     return 0;
 }
