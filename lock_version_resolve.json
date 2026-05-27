@@ -17,18 +17,6 @@
         "sha1": "5078750ed20c6d6323d27ed96fb2ddebc43bb247",
         "source": "github.com/TartanLlama/expected.git"
     },
-    "fmt": {
-        "commit_id": "3fba272021d507b310f4d059e3a4c1883b65fbc4",
-        "resolver_info": "5.0.1",
-        "sha1": "160978c7e6571cc06d6c8a590e5e0c4f3c826fba",
-        "source": "github.com/steinwurf/fmt.git"
-    },
-    "fmt-source": {
-        "commit_id": "0c9fce2ffefecfdce794e1859584e25877b7b592",
-        "resolver_info": "11.0.2",
-        "sha1": "f39ff778b3283f543cdfc9b1662ec101c453efce",
-        "source": "github.com/fmtlib/fmt.git"
-    },
     "gbenchmark-source": {
         "commit_id": "344117638c8ff7e239044fd0fa7085839fc03021",
         "resolver_info": "v1.8.3",

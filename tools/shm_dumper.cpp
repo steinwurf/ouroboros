@@ -2,17 +2,19 @@
 // SPDX-License-Identifier: MIT
 
 #include <CLI/CLI.hpp>
+#include <algorithm>
 #include <cstdint>
-#include <fmt/color.h>
-#include <fmt/core.h>
 #include <ouroboros/detail/buffer_format.hpp>
 #include <ouroboros/error_code.hpp>
 #include <ouroboros/reader.hpp>
 #include <ouroboros/shm_file.hpp>
 
 #include <fstream>
+#include <iomanip>
 #include <iostream>
+#include <sstream>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace
@@ -80,36 +82,67 @@ struct dump_stats
     }
 };
 
+void print_title(std::ostream& out, std::string_view title)
+{
+    out << title << "\n";
+}
+
+template <class T>
+void print_key_value(std::ostream& out, std::string_view key, const T& value,
+                     std::size_t key_width = 28)
+{
+    out << "  " << std::left << std::setw(static_cast<int>(key_width)) << key
+        << value << "\n";
+}
+
+void print_key_value_double(std::ostream& out, std::string_view key,
+                            double value, std::size_t key_width = 28,
+                            int precision = 1)
+{
+    auto old_flags = out.flags();
+    auto old_precision = out.precision();
+    out << "  " << std::left << std::setw(static_cast<int>(key_width)) << key
+        << std::fixed << std::setprecision(precision) << value << "\n";
+    out.flags(old_flags);
+    out.precision(old_precision);
+}
+
+auto make_range_string(uint64_t begin, uint64_t end) -> std::string
+{
+    std::ostringstream stream;
+    stream << "[" << begin << " -> " << end << "]";
+    return stream.str();
+}
+
 void print_dump_stats(const dump_stats& stats)
 {
-    fmt::print(stderr, "{}\n", fmt::styled("Statistics", fmt::emphasis::bold));
-    fmt::print(stderr, "  {:<28}{}\n", "Entries dumped:", stats.entries_dumped);
-    fmt::print(stderr, "  {:<28}{}\n",
-               "Max sequence number:", stats.max_sequence_number);
-    fmt::print(stderr, "  {:<28}{}\n",
-               "Max chunk token seen:", stats.max_chunk_token);
+    print_title(std::cerr, "Statistics");
+    print_key_value(std::cerr, "Entries dumped:", stats.entries_dumped);
+    print_key_value(std::cerr,
+                    "Max sequence number:", stats.max_sequence_number);
+    print_key_value(std::cerr, "Max chunk token seen:", stats.max_chunk_token);
 
     if (stats.have_entry_sizes)
     {
         const auto average_size = static_cast<double>(stats.entry_size_sum) /
                                   static_cast<double>(stats.entries_dumped);
-        fmt::print(stderr, "  {:<28}{}\n",
-                   "Entry size (on-wire) min:", stats.min_entry_size);
-        fmt::print(stderr, "  {:<28}{:.1f}\n",
-                   "Entry size (on-wire) avg:", average_size);
-        fmt::print(stderr, "  {:<28}{}\n",
-                   "Entry size (on-wire) max:", stats.max_entry_size);
+        print_key_value(std::cerr,
+                        "Entry size (on-wire) min:", stats.min_entry_size);
+        print_key_value_double(std::cerr,
+                               "Entry size (on-wire) avg:", average_size);
+        print_key_value(std::cerr,
+                        "Entry size (on-wire) max:", stats.max_entry_size);
     }
 
-    fmt::print(stderr, "  {:<28}{}\n",
-               "Total payload bytes:", stats.total_payload_bytes);
-    fmt::print(stderr, "  {:<28}{}\n",
-               "Total on-wire bytes:", stats.total_on_wire_bytes);
-    fmt::print(stderr, "  {:<28}{}\n",
-               "Writer finished marker:", stats.writer_finished ? "yes" : "no");
+    print_key_value(std::cerr,
+                    "Total payload bytes:", stats.total_payload_bytes);
+    print_key_value(std::cerr,
+                    "Total on-wire bytes:", stats.total_on_wire_bytes);
+    print_key_value(std::cerr, "Writer finished marker:",
+                    stats.writer_finished ? "yes" : "no");
     if (stats.read_errors > 0)
     {
-        fmt::print(stderr, "  {:<28}{}\n", "Read errors:", stats.read_errors);
+        print_key_value(std::cerr, "Read errors:", stats.read_errors);
     }
 }
 
@@ -229,40 +262,26 @@ auto main(int argc, char* argv[]) -> int
 
     if (verbose)
     {
-        fmt::print(stderr, "{}\n",
-                   fmt::styled("Reader Overview", fmt::emphasis::bold));
-        fmt::print(stderr, "  {:<22}{}\n", "Chunk count:",
-                   fmt::styled(fmt::format("{}", reader.chunk_count()),
-                               fmt::fg(fmt::terminal_color::bright_white)));
-        fmt::print(stderr, "  {:<22}{}\n", "Buffer ID:",
-                   fmt::styled(fmt::format("{}", reader.buffer_id()),
-                               fmt::fg(fmt::terminal_color::bright_white)));
-        fmt::print(stderr, "  {:<22}{}\n", "Current chunk index:",
-                   fmt::styled(fmt::format("{}", reader.current_chunk_index()),
-                               fmt::fg(fmt::terminal_color::bright_white)));
-        fmt::print(
-            stderr, "  {:<22}{}\n", "Current chunk token:",
-            fmt::styled(fmt::format("{}", reader.chunk_token(
-                                              reader.current_chunk_index())),
-                        fmt::fg(fmt::terminal_color::bright_white)));
-        fmt::print(
-            stderr, "  {:<22}{}\n", "Current chunk offset:",
-            fmt::styled(fmt::format("{}", reader.chunk_offset(
-                                              reader.current_chunk_index())),
-                        fmt::fg(fmt::terminal_color::bright_white)));
+        print_title(std::cerr, "Reader Overview");
+        print_key_value(std::cerr, "Chunk count:", reader.chunk_count(), 22);
+        print_key_value(std::cerr, "Buffer ID:", reader.buffer_id(), 22);
+        print_key_value(std::cerr,
+                        "Current chunk index:", reader.current_chunk_index(),
+                        22);
+        print_key_value(std::cerr, "Current chunk token:",
+                        reader.chunk_token(reader.current_chunk_index()), 22);
+        print_key_value(std::cerr, "Current chunk offset:",
+                        reader.chunk_offset(reader.current_chunk_index()), 22);
 
         std::size_t committed_count = 0;
         std::size_t committed_with_entries_count = 0;
         constexpr std::size_t chunks_per_row = 64;
-        auto current_chunk_index = reader.current_chunk_index();
-        fmt::print(stderr, "{}\n",
-                   fmt::styled("  Chunk map", fmt::emphasis::bold));
-        fmt::print(
-            stderr, "    {} {}\n",
-            fmt::styled("C=committed", fmt::fg(fmt::terminal_color::green)),
-            fmt::styled("U=uncommitted", fmt::fg(fmt::terminal_color::yellow)));
-        fmt::print(stderr, "    {:<12} {:<65} {:<27} {}\n", "range",
-                   "state-map", "token-range", "offset-range");
+        print_title(std::cerr, "  Chunk map");
+        std::cerr << "    C=committed c=committed(no entries) U=uncommitted\n";
+        std::cerr << "    " << std::left << std::setw(12) << "range" << " "
+                  << std::setw(65) << "state-map" << " " << std::setw(27)
+                  << "token-range"
+                  << " offset-range\n";
 
         for (std::size_t row_begin = 0; row_begin < reader.chunk_count();
              row_begin += chunks_per_row)
@@ -317,46 +336,25 @@ auto main(int argc, char* argv[]) -> int
                 auto last_token = reader.chunk_token(last_committed_index);
                 auto first_offset = reader.chunk_offset(first_committed_index);
                 auto last_offset = reader.chunk_offset(last_committed_index);
-                token_range =
-                    fmt::format("[{} -> {}]", first_token, last_token);
-                offset_range =
-                    fmt::format("[{} -> {}]", first_offset, last_offset);
+                token_range = make_range_string(first_token, last_token);
+                offset_range = make_range_string(first_offset, last_offset);
             }
 
-            fmt::print(stderr, "    [{:>4}-{:>4}]  ", row_begin, (row_end - 1));
+            std::cerr << "    [" << std::right << std::setw(4) << row_begin
+                      << "-" << std::setw(4) << (row_end - 1) << "]  ";
             for (std::size_t i = 0; i < state_map.size(); ++i)
             {
-                auto absolute_index = row_begin + i;
-                auto style = fmt::fg(fmt::terminal_color::yellow);
-                if (std::tolower(state_map[i]) == 'c')
-                {
-                    style = fmt::fg(fmt::terminal_color::green);
-                }
-                if (absolute_index == current_chunk_index)
-                {
-                    style = fmt::fg(fmt::terminal_color::bright_green) |
-                            fmt::emphasis::bold;
-                }
-                fmt::print(stderr, "{}", fmt::styled(state_map[i], style));
+                std::cerr << state_map[i];
             }
-            fmt::print(stderr, "{: <{}}  {:<27} {}\n", "",
-                       chunks_per_row - state_map.size(), token_range,
-                       offset_range);
+            std::cerr << std::string(chunks_per_row - state_map.size(), ' ')
+                      << "  " << std::left << std::setw(27) << token_range
+                      << " " << offset_range << "\n";
         }
 
         auto uncommitted_count = reader.chunk_count() - committed_count;
-        fmt::print(
-            stderr, "\n  {} {}, {} {}, {} {}\n",
-            fmt::styled("Chunks committed:",
-                        fmt::fg(fmt::terminal_color::green) |
-                            fmt::emphasis::bold),
-            committed_count,
-            fmt::styled("with entries:", fmt::fg(fmt::terminal_color::green) |
-                                             fmt::emphasis::bold),
-            committed_with_entries_count,
-            fmt::styled("uncommitted:", fmt::fg(fmt::terminal_color::yellow) |
-                                            fmt::emphasis::bold),
-            uncommitted_count);
+        std::cerr << "\n  Chunks committed: " << committed_count
+                  << ", with entries: " << committed_with_entries_count
+                  << ", uncommitted: " << uncommitted_count << "\n";
     }
 
     std::ofstream out_file(output_file);
@@ -410,7 +408,7 @@ auto main(int argc, char* argv[]) -> int
 
     if (verbose)
     {
-        fmt::print(stderr, "\n");
+        std::cerr << "\n";
         print_dump_stats(stats);
     }
 
