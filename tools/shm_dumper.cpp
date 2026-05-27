@@ -278,8 +278,8 @@ auto main(int argc, char* argv[]) -> int
         constexpr std::size_t chunks_per_row = 64;
         print_title(std::cerr, "  Chunk map");
         std::cerr << "    C=committed c=committed(no entries) U=uncommitted\n";
-        std::cerr << "    " << std::left << std::setw(12) << "range" << " "
-                  << std::setw(65) << "state-map" << " " << std::setw(27)
+        std::cerr << "    " << std::left << std::setw(12) << "range "
+                  << std::setw(65) << "state-map " << std::setw(27)
                   << "token-range offset-range\n";
 
         for (std::size_t row_begin = 0; row_begin < reader.chunk_count();

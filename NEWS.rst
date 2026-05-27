@@ -6,12 +6,15 @@ every change, see the Git log.
 
 Latest
 ------
-* tbd
+* Minor: Split generic no-data reader errors into more specific error codes.
+* Minor: Reworked `shm_dumper` to be more robust against chunks containing uncommitted data.
+* Minor: Improved POSIX SHM size-mismatch handling.
+* Minor: Changed writer entry overwrite behavior when at the end of a chunk.
 
 3.0.0
 -----
 * Major: Bump Cli11 to v2.6.2
-* Minor: Add ``--bin`` to dumper such that it can take raw binary snapshots of shared memory files, and make it such that dumper is always build by toplevel projects such that its available for usage in them. 
+* Minor: Add ``--bin`` to dumper such that it can take raw binary snapshots of shared memory files, and make it such that dumper is always build by toplevel projects such that its available for usage in them.
 
 2.0.0
 -----
