@@ -31,7 +31,7 @@ If you still see **“No parser available”**, check **Problems** for errors in
 
 - Keep `ouroboros_shm.js` open beside the binary file; **save** the parser to refresh the decode live.
 - Click an **offset** column value to jump to the matching line in the parser.
-- Entry listing stops after **500** entries for performance; edit `MAX_ENTRIES_SHOWN` in the parser if needed.
+- Entry listing stops after **5000** entries for performance; edit `MAX_ENTRIES_SHOWN` in the parser if needed.
 - Full-buffer layout matches `writer.hpp` / `buffer_format.hpp` (magic `OUROBLOG`, version 2, 4-byte entry headers with commit MSB).
 
 ## Slice files

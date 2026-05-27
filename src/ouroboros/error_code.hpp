@@ -26,7 +26,6 @@ enum class error
 
 auto make_error_code(error error) -> std::error_code;
 auto make_error_condition(error error) -> std::error_condition;
-auto is_no_data_error(const std::error_code& error) -> bool;
 
 /// Error information returned by writer configure operations.
 ///

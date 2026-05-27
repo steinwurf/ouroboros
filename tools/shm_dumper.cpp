@@ -391,20 +391,21 @@ auto main(int argc, char* argv[]) -> int
         }
 
         const auto& entry = entry_result.value();
+        auto entry_str = std::string(entry.data);
+        if (!entry.is_valid())
+        {
+            std::cerr << "Warning: Entry is changed while reading, skipping\n";
+            break;
+        }
+
         const std::size_t on_wire_size =
-            entry.data.size() +
+            entry_str.size() +
             ouroboros::detail::buffer_format::entry_header_size;
 
         stats.record_entry(on_wire_size, entry.sequence_number,
                            entry.chunk_token);
-        if (entry.is_valid())
-        {
-            out_file << entry.data << "\n";
-        }
-        else
-        {
-            std::cerr << "Warning: Entry is invalid, skipping\n";
-        }
+
+        out_file << entry_str << "\n";
     }
 
     if (verbose)
