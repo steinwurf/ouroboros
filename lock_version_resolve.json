@@ -1,10 +1,4 @@
 {
-    "bourne": {
-        "commit_id": "b824b289f1d8cbfeecc26743ea5579e5d3051c8c",
-        "resolver_info": "11.1.0",
-        "sha1": "f705097630cc09ecd747eaf3b5eef8966cfa4fba",
-        "source": "github.com/steinwurf/bourne.git"
-    },
     "cli11-source": {
         "commit_id": "37bb6edc5317e99af72ef48405e65d9ca5218861",
         "resolver_info": "v2.6.2",
