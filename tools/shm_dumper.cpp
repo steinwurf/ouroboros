@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include <CLI/CLI.hpp>
+#include <bourne/json.hpp>
 #include <cstdint>
 #include <fmt/color.h>
 #include <fmt/core.h>
@@ -125,11 +126,15 @@ auto main(int argc, char* argv[]) -> int
     std::string bin_path;
     std::string output_file;
     bool verbose = false;
+    bool verify_entries = false;
 
     app.add_option("--name", shm_name, "Shared memory name");
     app.add_option("--bin", bin_path, "Path to a persistent binary file");
     app.add_option("--output", output_file, "Output file path")->required();
     app.add_flag("--verbose", verbose, "Enable verbose output")
+        ->default_val("false");
+    app.add_flag("--verify-entries", verify_entries,
+                 "Verify entries are valid JSON")
         ->default_val("false");
 
     try
@@ -253,7 +258,7 @@ auto main(int argc, char* argv[]) -> int
 
         std::size_t committed_count = 0;
         std::size_t committed_with_entries_count = 0;
-        constexpr std::size_t chunks_per_row = 16;
+        constexpr std::size_t chunks_per_row = 64;
         auto current_chunk_index = reader.current_chunk_index();
         fmt::print(stderr, "{}\n",
                    fmt::styled("  Chunk map", fmt::emphasis::bold));
@@ -399,6 +404,19 @@ auto main(int argc, char* argv[]) -> int
                            entry.chunk_token);
         if (entry.is_valid())
         {
+            if (verify_entries)
+            {
+                std::error_code error;
+                const auto json =
+                    bourne::json::parse(std::string(entry.data), error);
+                if (error)
+                {
+                    std::cerr << "Error: Failed to parse entry as JSON: "
+                              << error.message() << "\n";
+                    continue;
+                }
+            }
+
             out_file << entry.data << "\n";
         }
         else

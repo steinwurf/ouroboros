@@ -6,11 +6,9 @@
 #include <tl/expected.hpp>
 
 #include <string>
-#include <tuple>
 #include <type_traits>
 #include <utility>
 
-#include "detail/span.hpp"
 #include "shm_platform.hpp"
 #include "version.hpp"
 

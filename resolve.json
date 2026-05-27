@@ -57,6 +57,15 @@
         ]
     },
     {
+        "name": "bourne",
+        "resolver": "git",
+        "method": "semver",
+        "major": 11,
+        "sources": [
+            "github.com/steinwurf/bourne.git"
+        ]
+    },
+    {
         "name": "gbenchmark-source",
         "internal": true,
         "resolver": "git",
