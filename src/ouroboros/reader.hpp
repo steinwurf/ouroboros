@@ -8,7 +8,6 @@
 
 #include <cstdint>
 #include <cstring>
-#include <iostream>
 #include <string_view>
 
 #include "detail/atomic.hpp"
@@ -619,11 +618,12 @@ private:
         for (std::size_t i = 1; i < chunk_count; ++i)
         {
             const auto info = get_chunk_info(buffer, i);
-            if (!info.is_committed())
+            if (!info.is_committed() || !has_committed_entry(buffer, info))
             {
                 continue;
             }
-            if (!best_chunk.is_committed())
+            if (!best_chunk.is_committed() ||
+                !has_committed_entry(buffer, best_chunk))
             {
                 best_chunk = info;
                 continue;
@@ -641,28 +641,16 @@ private:
     find_chunk_with_lowest_token(std::span<const uint8_t> buffer,
                                  std::size_t chunk_count) -> chunk_info
     {
-        chunk_info best_chunk{};
-        chunk_info fallback_chunk{};
-        for (std::size_t i = 0; i < chunk_count; ++i)
+        chunk_info best_chunk = get_chunk_info(buffer, 0);
+        for (std::size_t i = 1; i < chunk_count; ++i)
         {
             const auto info = get_chunk_info(buffer, i);
-            if (!info.is_committed())
+            if (!info.is_committed() || !has_committed_entry(buffer, info))
             {
                 continue;
             }
-
-            if (!fallback_chunk.is_committed() ||
-                info.token() < fallback_chunk.token())
-            {
-                fallback_chunk = info;
-            }
-
-            if (!has_committed_entry(buffer, info))
-            {
-                continue;
-            }
-
-            if (!best_chunk.is_committed())
+            if (!best_chunk.is_committed() ||
+                !has_committed_entry(buffer, best_chunk))
             {
                 best_chunk = info;
                 continue;
@@ -672,14 +660,7 @@ private:
                 best_chunk = info;
             }
         }
-        if (best_chunk.is_committed())
-        {
-            return best_chunk;
-        }
-
-        // If all committed chunks currently point to uncommitted entry headers,
-        // preserve previous behavior by returning the lowest committed chunk.
-        return fallback_chunk;
+        return best_chunk;
     }
 
     static auto has_committed_entry(std::span<const uint8_t> buffer,
