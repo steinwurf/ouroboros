@@ -281,7 +281,8 @@ TEST(test_shm, reader_empty_buffer_handling)
     auto entry_result = reader.read_next_entry();
     ASSERT_FALSE(entry_result.has_value());
     EXPECT_EQ(entry_result.error(),
-              ouroboros::make_error_code(ouroboros::error::no_data_available));
+              ouroboros::make_error_code(
+                  ouroboros::error::no_data_entry_uncommitted));
 }
 
 TEST(test_shm, multiple_readers)
@@ -369,8 +370,8 @@ TEST(test_shm, interleaved_operations)
 
     auto entry4 = reader.read_next_entry();
     ASSERT_FALSE(entry4.has_value());
-    EXPECT_EQ(entry4.error(),
-              ouroboros::make_error_code(ouroboros::error::no_data_available));
+    EXPECT_EQ(entry4.error(), ouroboros::make_error_code(
+                                  ouroboros::error::no_data_entry_uncommitted));
 }
 
 TEST(test_shm, wrap_behavior)

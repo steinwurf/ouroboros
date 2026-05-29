@@ -175,6 +175,14 @@ inline auto create_or_open_and_map_shm(const std::string& name,
     VERIFY(reinterpret_cast<uintptr_t>(ptr) % 8 == 0,
            "Mapped shared memory is not 8-byte aligned");
 
+    if (existing_size != size)
+    {
+        munmap(ptr, existing_size);
+        close(fd);
+        return tl::make_unexpected(
+            make_error_code(ouroboros::error::shared_memory_size_mismatch));
+    }
+
     shm_handle handle;
     handle.fd = fd;
     return shm_mapping{handle, ptr, existing_size, false};

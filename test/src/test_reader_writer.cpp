@@ -4,6 +4,7 @@
 #include <ouroboros/reader.hpp>
 #include <ouroboros/writer.hpp>
 
+#include <fstream>
 #include <ouroboros/error_code.hpp>
 
 #include <cstring>
@@ -302,8 +303,8 @@ TEST(test_reader_writer, interleaved_operations)
     // Reader tries to read again - should fail
     auto entry4 = reader.read_next_entry();
     ASSERT_FALSE(entry4.has_value());
-    EXPECT_EQ(entry4.error(),
-              ouroboros::make_error_code(ouroboros::error::no_data_available));
+    EXPECT_EQ(entry4.error(), ouroboros::make_error_code(
+                                  ouroboros::error::no_data_entry_uncommitted));
 }
 
 TEST(test_reader_writer, writer_finish_reader_returns_writer_finished)
@@ -617,4 +618,126 @@ TEST(test_reader_writer, chunk_invalidation_and_wrap_sequence)
         auto no_more = reader2.read_next_entry();
         EXPECT_FALSE(no_more.has_value());
     }
+}
+
+TEST(test_reader_writer, overwrite_entries_after_wrap)
+{
+    constexpr std::size_t chunk_target_size = 128;
+    constexpr std::size_t chunk_count = 5;
+    auto buffer_size = ouroboros::detail::buffer_format::compute_buffer_size(
+        chunk_target_size, chunk_count);
+    auto buffer = create_aligned_buffer(buffer_size);
+    std::span<uint8_t> buffer_span(buffer);
+
+    ouroboros::writer writer;
+    writer.configure(buffer_span, chunk_target_size, chunk_count);
+
+    // Write enough entries to create a wrap
+    const std::size_t small_entry_size = 4; // 4 bytes + header = 8 bytes
+    const std::size_t total_small_entry_size =
+        small_entry_size + 4; // 4 bytes padding per chunk
+    const std::size_t small_entry_count =
+        (chunk_target_size / total_small_entry_size) * chunk_count;
+
+    SCOPED_TRACE(::testing::Message()
+                 << "Small entry count: " << small_entry_count);
+
+    for (std::size_t i = 0; i < small_entry_count; ++i)
+    {
+        SCOPED_TRACE(::testing::Message() << "Writing entry " << i);
+        const char small_entry_char = 'A' + (i % 26);
+        writer.write(std::string(small_entry_size, small_entry_char));
+        std::size_t expected_current_chunk_index =
+            i / (chunk_target_size / total_small_entry_size) % chunk_count;
+        ASSERT_EQ(writer.current_chunk_index(), expected_current_chunk_index);
+    }
+
+    ASSERT_EQ(writer.current_chunk_index(), chunk_count - 1);
+
+    for (std::size_t i = 0; i < 16; ++i)
+    {
+        SCOPED_TRACE(::testing::Message() << "Writing wrap entry " << i);
+        writer.write("WRAP");
+        ASSERT_EQ(writer.current_chunk_index(), 0);
+    }
+
+    // Read the entries
+    ouroboros::reader reader;
+    auto result =
+        reader.configure(std::span<const uint8_t>(buffer_span),
+                         ouroboros::reader::read_strategy::from_lowest);
+    ASSERT_TRUE(result.has_value());
+
+    for (std::size_t i = 0; i < chunk_count; ++i)
+    {
+        SCOPED_TRACE(::testing::Message() << "Checking chunk " << i);
+        ASSERT_TRUE(reader.is_chunk_committed(i));
+        ASSERT_TRUE(reader.has_committed_entry(i));
+    }
+
+    ASSERT_EQ(reader.current_chunk_index(), 1);
+
+    std::vector<std::string> entries;
+    // Read the entries
+    for (std::size_t i = 0; i < small_entry_count; ++i)
+    {
+        auto entry = reader.read_next_entry();
+        ASSERT_TRUE(entry.has_value())
+            << "Entry " << i << " should be "
+            << std::string(small_entry_size, 'A' + (i % 26));
+        entries.push_back(std::string(entry.value().data));
+    }
+
+    // Check that no more entries are available
+    auto no_more = reader.read_next_entry();
+    EXPECT_FALSE(no_more.has_value());
+
+    EXPECT_EQ(entries.front(), std::string(small_entry_size, 'Q'));
+
+    // Now let's fill up the next chunk with more entries until space for just
+    // one more entry is available
+    for (std::size_t i = 0; i < 15; ++i)
+    {
+        writer.write("LAST");
+    }
+
+    // Now write an entry that will overlap into the next two chunks (8 bytes
+    // are remaining in this chunk)
+    std::string large_entry(8 + chunk_target_size, '+');
+    writer.write(large_entry);
+
+    // Re-read the entries with a fresh reader to verify the state
+    ouroboros::reader reader2;
+    auto result2 =
+        reader2.configure(std::span<const uint8_t>(buffer_span),
+                          ouroboros::reader::read_strategy::from_lowest);
+    ASSERT_TRUE(result2.has_value());
+
+    {
+        // Dump the buffer to a file called buffer.bin
+        std::ofstream buffer_file("./buffer.bin", std::ios::binary);
+        buffer_file.write(reinterpret_cast<const char*>(buffer_span.data()),
+                          buffer_span.size());
+        buffer_file.close();
+    }
+    EXPECT_EQ(reader2.current_chunk_index(), 4);
+    EXPECT_TRUE(reader2.is_chunk_committed(0));
+    EXPECT_TRUE(reader2.is_chunk_committed(1));
+    // These have been overwritten by the large entry
+    EXPECT_FALSE(reader2.is_chunk_committed(2));
+    EXPECT_FALSE(reader2.is_chunk_committed(3));
+
+    std::vector<std::string> entries2;
+    while (true)
+    {
+        auto entry = reader2.read_next_entry();
+        if (!entry.has_value())
+        {
+            break;
+        }
+        entries2.push_back(std::string(entry.value().data));
+    }
+
+    EXPECT_EQ(entries2.front(), "MMMM");
+    EXPECT_EQ(entries2.back(), large_entry);
 }

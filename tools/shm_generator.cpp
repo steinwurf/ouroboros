@@ -33,15 +33,15 @@ auto bytes_to_hex(const std::vector<uint8_t>& bytes) -> std::string
 }
 
 // Calculate chunk configuration from buffer size
-// Tries to use 4 chunks with reasonable target size
-auto calculate_chunk_config(std::size_t buffer_size)
+// Tries to use the given chunk count with reasonable target size
+auto calculate_chunk_config(std::size_t buffer_size,
+                            std::size_t target_chunk_count)
     -> std::pair<std::size_t, std::size_t>
 {
-    constexpr std::size_t default_chunk_count = 4;
     constexpr std::size_t buffer_header_size = 16;
     constexpr std::size_t chunk_row_size = 16;
 
-    std::size_t chunk_table_size = default_chunk_count * chunk_row_size;
+    std::size_t chunk_table_size = target_chunk_count * chunk_row_size;
     std::size_t header_size = buffer_header_size + chunk_table_size;
 
     if (buffer_size < header_size + 1024)
@@ -56,9 +56,9 @@ auto calculate_chunk_config(std::size_t buffer_size)
     }
 
     std::size_t available_space = buffer_size - header_size;
-    std::size_t chunk_target_size = available_space / default_chunk_count;
+    std::size_t chunk_target_size = available_space / target_chunk_count;
 
-    return {chunk_target_size, default_chunk_count};
+    return {chunk_target_size, target_chunk_count};
 }
 
 struct RecordInfo
@@ -134,6 +134,7 @@ auto main(int argc, char* argv[]) -> int
     uint64_t seed = 0;
     uint64_t interval_us = 0;
     uint64_t initial_delay_us = 0;
+    std::size_t target_chunk_count = 0;
     std::string json_output_path;
     bool unlink_at_exit = true;
 
@@ -169,7 +170,9 @@ auto main(int argc, char* argv[]) -> int
     app.add_flag("--no-unlink-at-exit", no_unlink_at_exit,
                  "Keep shared memory segment after exit (for readers)")
         ->excludes("--unlink-at-exit");
-
+    app.add_option("--chunk-count", target_chunk_count, "Number of chunks")
+        ->default_val(4)
+        ->check(CLI::PositiveNumber);
     try
     {
         app.parse(argc, argv);
@@ -197,7 +200,8 @@ auto main(int argc, char* argv[]) -> int
     g_shm_name = shm_name;
 
     // Calculate chunk configuration
-    auto [chunk_target_size, chunk_count] = calculate_chunk_config(buffer_size);
+    auto [chunk_target_size, chunk_count] =
+        calculate_chunk_config(buffer_size, target_chunk_count);
 
     // Create shared memory mapping and writer
     const std::size_t required_size =

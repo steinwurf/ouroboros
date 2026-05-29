@@ -233,6 +233,8 @@ public:
         // Zero out the first entry header
         std::memset(m_buffer.data() + m_offset, 0,
                     detail::buffer_format::entry_header_size);
+        // Publish an initial committed chunk so readers can attach and find a
+        // stable start offset; the first entry itself is still uncommitted.
         commit_chunk(m_buffer, m_current_chunk_index);
 
         return {};
@@ -368,13 +370,35 @@ public:
             m_offset, detail::buffer_format::entry_alignment);
 
         // Zero out the next entry header if there is space
+        // This is done such that the readers do not read into stale data
         if (m_offset + detail::buffer_format::entry_header_size <=
             m_buffer.size())
         {
-            auto next_header_span = m_buffer.subspan(
-                m_offset, detail::buffer_format::entry_header_size);
-            std::memset(next_header_span.data(), 0,
-                        detail::buffer_format::entry_header_size);
+            // Only do this if we are still within the same chunk.
+            bool within_same_chunk = true;
+            if (m_current_chunk_index + 1 < m_chunk_count)
+            {
+                auto next_chunk = m_current_chunk_index + 1;
+
+                if (detail::buffer_format::is_chunk_committed(m_buffer,
+                                                              next_chunk) &&
+                    m_offset >= detail::buffer_format::get_chunk_offset(
+                                    m_buffer, next_chunk))
+                {
+                    within_same_chunk = false;
+                }
+            }
+            if (within_same_chunk)
+            {
+                // Only clear next header if we are still within the same chunk
+                // The reader will know not to re-read the next header by
+                // checking the chunk token of the next chunk when it reaches
+                // the end of the current chunk.
+                auto next_header_span = m_buffer.subspan(
+                    m_offset, detail::buffer_format::entry_header_size);
+                std::memset(next_header_span.data(), 0,
+                            detail::buffer_format::entry_header_size);
+            }
         }
 
         // Commit the entry
@@ -472,6 +496,11 @@ public:
     auto total_entries_written() const -> std::size_t
     {
         return m_total_entries_written;
+    }
+
+    auto current_chunk_index() const -> std::size_t
+    {
+        return m_current_chunk_index;
     }
 
     /// Get the buffer ID configured at setup.
