@@ -6,6 +6,10 @@ every change, see the Git log.
 
 Latest
 ------
+* tbd
+
+4.0.0
+-----
 * Major: Split generic no-data reader errors into more specific error codes.
 * Minor: Reworked `shm_dumper` to be more robust against chunks containing uncommitted data.
 * Minor: Improved POSIX SHM size-mismatch handling.
