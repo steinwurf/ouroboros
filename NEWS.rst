@@ -6,7 +6,7 @@ every change, see the Git log.
 
 Latest
 ------
-* Minor: Split generic no-data reader errors into more specific error codes.
+* Major: Split generic no-data reader errors into more specific error codes.
 * Minor: Reworked `shm_dumper` to be more robust against chunks containing uncommitted data.
 * Minor: Improved POSIX SHM size-mismatch handling.
 * Minor: Changed writer entry overwrite behavior when at the end of a chunk.
