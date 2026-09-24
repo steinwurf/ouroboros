@@ -35,7 +35,11 @@ enum class shm_access
 /// The object owns the mapping and unmaps it on destruction or reassignment.
 /// Optionally, a read-write instance can also unlink the backing shared-memory
 /// object on cleanup.
-template <shm_access Access>
+///
+/// `Backing` selects the storage:
+/// - `shm_backing::named` (default): a named shared-memory object
+/// - `shm_backing::file`: a regular filesystem file mapped into the process
+template <shm_access Access, shm_backing Backing = shm_backing::named>
 class shm_file
 {
 public:
@@ -95,7 +99,7 @@ public:
     {
         cleanup();
 
-        auto result = open_and_map_shm(name);
+        auto result = open_and_map_shm(name, Backing);
         if (!result)
         {
             return tl::make_unexpected(result.error());
@@ -125,7 +129,7 @@ public:
     {
         cleanup();
 
-        auto result = create_or_open_and_map_shm(name, size);
+        auto result = create_or_open_and_map_shm(name, size, Backing);
         if (!result)
         {
             return tl::make_unexpected(result.error());
@@ -190,7 +194,7 @@ public:
     {
         if (!m_name.empty())
         {
-            unlink_shm(m_name);
+            unlink_shm(m_name, Backing);
             m_should_unlink = false;
         }
     }
@@ -206,7 +210,7 @@ private:
         }
         if (m_should_unlink && !m_name.empty())
         {
-            unlink_shm(m_name);
+            unlink_shm(m_name, Backing);
         }
         m_name.clear();
         m_size = 0;

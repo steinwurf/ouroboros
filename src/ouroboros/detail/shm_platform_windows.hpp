@@ -15,6 +15,7 @@
 #include <string>
 
 #include "../error_code.hpp"
+#include "shm_backing.hpp"
 
 namespace ouroboros
 {
@@ -49,7 +50,9 @@ struct shm_mapping
 /// @param name Name of the shared memory segment
 /// @param size Size of the shared memory segment in bytes (used when creating)
 /// @return An shm_mapping or an error
-auto create_or_open_and_map_shm(const std::string& name, std::size_t size)
+auto create_or_open_and_map_shm(
+    const std::string& name, std::size_t size,
+    shm_backing backing = shm_backing::named)
     -> tl::expected<shm_mapping, std::error_code>;
 
 /// Open and map an existing shared memory segment for reading (Windows
@@ -57,7 +60,8 @@ auto create_or_open_and_map_shm(const std::string& name, std::size_t size)
 ///
 /// @param name Name of the shared memory segment
 /// @return A tuple of (handle, mapped pointer, size) or an error
-auto open_and_map_shm(const std::string& name)
+auto open_and_map_shm(const std::string& name,
+                      shm_backing backing = shm_backing::named)
     -> tl::expected<std::tuple<shm_handle, void*, std::size_t>,
                     std::error_code>;
 
@@ -73,7 +77,8 @@ void unmap_shm(const shm_handle& handle, void* ptr, std::size_t size);
 /// @param name Name of the shared memory segment
 /// Note: Windows doesn't have unlink, but we can close the handle
 /// This is a no-op here as unlinking is handled by closing the handle
-void unlink_shm(const std::string& name);
+void unlink_shm(const std::string& name,
+                shm_backing backing = shm_backing::named);
 
 } // namespace detail
 }
