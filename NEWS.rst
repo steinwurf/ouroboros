@@ -9,6 +9,8 @@ Latest
 * Minor: Added file-backed shared memory. Pass ``shm_backing::file`` to the
   ``shm_file`` constructor to map a regular filesystem file. Named shared
   memory remains the default.
+* Minor: Added ``--file`` to ``shm_generator`` and ``shm_dumper`` to create
+  and read file-backed shared-memory mappings.
 
 4.0.0
 -----

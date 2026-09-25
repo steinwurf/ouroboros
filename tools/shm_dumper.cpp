@@ -150,17 +150,22 @@ void print_dump_stats(const dump_stats& stats)
 
 auto main(int argc, char* argv[]) -> int
 {
-    CLI::App app{"Dump log entries from shared memory or a persistent binary "
-                 "file starting from the lowest entry. Either --name or --bin "
-                 "must be provided, but not both."};
+    CLI::App app{"Dump log entries from named shared memory, a file-backed "
+                 "mapping, or a persistent binary file, starting from the "
+                 "lowest entry."};
 
     std::string shm_name;
+    std::string file_path;
     std::string bin_path;
     std::string output_file;
     bool verbose = false;
 
-    app.add_option("--name", shm_name, "Shared memory name");
-    app.add_option("--bin", bin_path, "Path to a persistent binary file");
+    auto* source = app.add_option_group("source", "Source of the log entries");
+    source->add_option("--name", shm_name, "Named shared-memory object");
+    source->add_option("--file", file_path,
+                       "Filesystem path of a file-backed mapping");
+    source->add_option("--bin", bin_path, "Path to a persistent binary file");
+    source->require_option(1);
     app.add_option("--output", output_file, "Output file path")->required();
     app.add_flag("--verbose", verbose, "Enable verbose output")
         ->default_val("false");
@@ -168,20 +173,9 @@ auto main(int argc, char* argv[]) -> int
     try
     {
         app.parse(argc, argv);
-
-        // Manual Exclusivity
-        bool has_shm = !shm_name.empty();
-        bool has_bin = !bin_path.empty();
-
-        if (has_shm == has_bin) // Both true or both false
-        {
-            throw CLI::ValidationError(
-                "Exactly one of --name or --bin must be provided.");
-        }
     }
     catch (const CLI::ParseError& e)
     {
-        std::cerr << app.help() << "\n";
         return app.exit(e);
     }
 
@@ -192,6 +186,10 @@ auto main(int argc, char* argv[]) -> int
         {
             std::cerr << "  Shared Memory Name: " << shm_name << "\n";
         }
+        else if (!file_path.empty())
+        {
+            std::cerr << "  File-backed Path: " << file_path << "\n";
+        }
         else
         {
             std::cerr << "  Binary File Path: " << bin_path << "\n";
@@ -199,7 +197,9 @@ auto main(int argc, char* argv[]) -> int
         std::cerr << "  Output File: " << output_file << "\n";
     }
     std::vector<uint8_t> file_buffer;
-    ouroboros::shm_file<ouroboros::shm_access::read_only> shm_file;
+    const auto backing = file_path.empty() ? ouroboros::shm_backing::named
+                                           : ouroboros::shm_backing::file;
+    ouroboros::shm_file<ouroboros::shm_access::read_only> shm_file(backing);
 
     const uint8_t* data_ptr = nullptr;
     std::size_t data_size = -1;
@@ -228,10 +228,12 @@ auto main(int argc, char* argv[]) -> int
     }
     else
     {
-        auto shm_result = shm_file.open(shm_name);
+        const std::string& target = file_path.empty() ? shm_name : file_path;
+        auto shm_result = shm_file.open(target);
         if (!shm_result.has_value())
         {
-            std::cerr << "Error: Failed to open shared memory: "
+            std::cerr << "Error: Failed to open "
+                      << (file_path.empty() ? "shared memory" : "file") << ": "
                       << shm_result.error().message() << "\n";
             return 1;
         }
