@@ -6,10 +6,9 @@ every change, see the Git log.
 
 Latest
 ------
-* Minor: Added file-backed shared memory via
-  ``shm_file<Access, shm_backing::file>``, which maps a regular filesystem
-  file. Named shared memory remains the default.
-* tbd
+* Minor: Added file-backed shared memory. Pass ``shm_backing::file`` to the
+  ``shm_file`` constructor to map a regular filesystem file. Named shared
+  memory remains the default.
 
 4.0.0
 -----
