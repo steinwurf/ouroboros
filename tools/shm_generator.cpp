@@ -106,6 +106,7 @@ auto write_json_output(const std::string& path,
 // Global flag for signal handling
 static std::atomic<bool> g_interrupted{false};
 static std::string g_shm_name;
+static ouroboros::shm_backing g_backing = ouroboros::shm_backing::named;
 static std::atomic<bool> g_writer_configured{false};
 
 // Signal handler for Ctrl+C
@@ -117,16 +118,18 @@ void signal_handler(int signal)
         // Unlink shared memory immediately if it was configured
         if (g_writer_configured.load() && !g_shm_name.empty())
         {
-            ouroboros::unlink_shm(g_shm_name);
+            ouroboros::unlink_shm(g_shm_name, g_backing);
         }
     }
 }
 
 auto main(int argc, char* argv[]) -> int
 {
-    CLI::App app{"Generate deterministic log records in shared memory"};
+    CLI::App app{"Generate deterministic log records in named or file-backed "
+                 "shared memory"};
 
     std::string shm_name;
+    std::string file_path;
     std::size_t buffer_size = 0;
     uint64_t record_count = 0;
     uint64_t min_payload_size = 0;
@@ -138,7 +141,11 @@ auto main(int argc, char* argv[]) -> int
     std::string json_output_path;
     bool unlink_at_exit = true;
 
-    app.add_option("--name", shm_name, "Shared memory name")->required();
+    auto* source = app.add_option_group("source", "Source of the log entries");
+    source->add_option("--name", shm_name, "Named shared-memory object");
+    source->add_option("--file", file_path,
+                       "Filesystem path for a file-backed mapping");
+    source->require_option(1);
     app.add_option("--size", buffer_size, "Shared memory size in bytes")
         ->required()
         ->check(CLI::NonNegativeNumber);
@@ -166,9 +173,9 @@ auto main(int argc, char* argv[]) -> int
         ->required();
     bool no_unlink_at_exit = false;
     app.add_flag("--unlink-at-exit", unlink_at_exit,
-                 "Unlink shared memory segment on exit (default: true)");
+                 "Unlink the mapping on exit (default: true)");
     app.add_flag("--no-unlink-at-exit", no_unlink_at_exit,
-                 "Keep shared memory segment after exit (for readers)")
+                 "Keep the mapping after exit (for readers)")
         ->excludes("--unlink-at-exit");
     app.add_option("--chunk-count", target_chunk_count, "Number of chunks")
         ->default_val(4)
@@ -179,7 +186,6 @@ auto main(int argc, char* argv[]) -> int
     }
     catch (const CLI::ParseError& e)
     {
-        std::cerr << app.help() << "\n";
         return app.exit(e);
     }
 
@@ -195,9 +201,14 @@ auto main(int argc, char* argv[]) -> int
         return 1;
     }
 
+    const bool file_backed = !file_path.empty();
+    const std::string& target = file_backed ? file_path : shm_name;
+    g_backing = file_backed ? ouroboros::shm_backing::file
+                            : ouroboros::shm_backing::named;
+    g_shm_name = target;
+
     // Set up signal handler for Ctrl+C
     std::signal(SIGINT, signal_handler);
-    g_shm_name = shm_name;
 
     // Calculate chunk configuration
     auto [chunk_target_size, chunk_count] =
@@ -207,12 +218,13 @@ auto main(int argc, char* argv[]) -> int
     const std::size_t required_size =
         ouroboros::detail::buffer_format::compute_buffer_size(chunk_target_size,
                                                               chunk_count);
-    ouroboros::shm_file<ouroboros::shm_access::read_write> shm_file;
+    ouroboros::shm_file<ouroboros::shm_access::read_write> shm_file(g_backing);
     auto shm_result =
-        shm_file.open_or_create(shm_name, required_size, unlink_at_exit);
+        shm_file.open_or_create(target, required_size, unlink_at_exit);
     if (!shm_result.has_value())
     {
-        std::cerr << "Error: Failed to open/create shared memory: "
+        std::cerr << "Error: Failed to open/create "
+                  << (file_backed ? "file" : "shared memory") << ": "
                   << shm_result.error().message() << "\n";
         return 1;
     }
@@ -231,7 +243,9 @@ auto main(int argc, char* argv[]) -> int
 
     // Print reader information in easily parseable JSON format
     std::cout << "{\n";
-    std::cout << "  \"shm_name\": \"" << shm_name << "\",\n";
+    std::cout << "  \"shm_name\": \"" << target << "\",\n";
+    std::cout << "  \"backing\": \"" << (file_backed ? "file" : "named")
+              << "\",\n";
     std::cout << "  \"buffer_size\": " << shm_file.size() << ",\n";
     std::cout << "  \"chunk_target_size\": " << writer.chunk_target_size()
               << ",\n";

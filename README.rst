@@ -74,6 +74,14 @@ Or use shared memory for inter-process logging:
     reader.configure(std::span<const uint8_t>(reader_shm.data(), reader_shm.size()));
     auto entry = reader.read_next();
 
+The same API can map a regular file instead of a named shared-memory object:
+
+.. code-block:: cpp
+
+    ouroboros::shm_file<ouroboros::shm_access::read_write> writer_shm(
+        ouroboros::shm_backing::file);
+    writer_shm.open_or_create("/tmp/my_log.bin", buffer_size, false);
+
 Building 🏗️
 -----------
 
