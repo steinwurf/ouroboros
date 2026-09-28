@@ -10,7 +10,7 @@ from waflib.Build import BuildContext
 
 
 APPNAME = "ouroboros"
-VERSION = "4.0.0"
+VERSION = "5.0.0"
 
 
 def options(ctx):

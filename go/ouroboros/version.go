@@ -4,4 +4,4 @@
 package ouroboros
 
 // PackageVersion is the semantic version of the ouroboros Go package.
-var PackageVersion = "4.0.0"
+var PackageVersion = "5.0.0"

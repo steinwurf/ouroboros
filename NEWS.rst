@@ -6,6 +6,10 @@ every change, see the Git log.
 
 Latest
 ------
+* tbd
+
+5.0.0
+-----
 * Major: Added file-backed shared memory. ``shm_file::open`` /
   ``open_or_create`` and the platform map/unlink helpers take an explicit
   ``shm_backing`` as their first argument.

@@ -7,7 +7,7 @@
 
 namespace ouroboros
 {
-#define STEINWURF_OUROBOROS_VERSION v4_0_0
+#define STEINWURF_OUROBOROS_VERSION v5_0_0
 
 inline namespace STEINWURF_OUROBOROS_VERSION
 {
