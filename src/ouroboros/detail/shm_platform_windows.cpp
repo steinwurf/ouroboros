@@ -43,11 +43,10 @@ bool shm_handle::is_valid() const
 auto create_or_open_and_map_file(const std::string& path, std::size_t size)
     -> tl::expected<shm_mapping, std::error_code>
 {
-    HANDLE hFile = CreateFileA(path.c_str(), GENERIC_READ | GENERIC_WRITE,
-                               FILE_SHARE_READ | FILE_SHARE_WRITE |
-                                   FILE_SHARE_DELETE,
-                               nullptr, CREATE_NEW, FILE_ATTRIBUTE_NORMAL,
-                               nullptr);
+    HANDLE hFile =
+        CreateFileA(path.c_str(), GENERIC_READ | GENERIC_WRITE,
+                    FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                    nullptr, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, nullptr);
     if (hFile != INVALID_HANDLE_VALUE)
     {
         LARGE_INTEGER file_size;
@@ -120,7 +119,8 @@ auto create_or_open_and_map_file(const std::string& path, std::size_t size)
             make_error_code(ouroboros::error::shared_memory_stat_failed));
     }
 
-    const std::size_t existing_size = static_cast<std::size_t>(existing.QuadPart);
+    const std::size_t existing_size =
+        static_cast<std::size_t>(existing.QuadPart);
     if (existing_size != size)
     {
         CloseHandle(hFile);
@@ -128,8 +128,8 @@ auto create_or_open_and_map_file(const std::string& path, std::size_t size)
             make_error_code(ouroboros::error::shared_memory_size_mismatch));
     }
 
-    HANDLE hMap = CreateFileMappingA(hFile, nullptr, PAGE_READWRITE, 0, 0,
-                                     nullptr);
+    HANDLE hMap =
+        CreateFileMappingA(hFile, nullptr, PAGE_READWRITE, 0, 0, nullptr);
     CloseHandle(hFile);
     if (hMap == nullptr)
     {
@@ -137,8 +137,7 @@ auto create_or_open_and_map_file(const std::string& path, std::size_t size)
             make_error_code(ouroboros::error::shared_memory_open_failed));
     }
 
-    void* ptr =
-        MapViewOfFile(hMap, FILE_MAP_ALL_ACCESS, 0, 0, existing_size);
+    void* ptr = MapViewOfFile(hMap, FILE_MAP_ALL_ACCESS, 0, 0, existing_size);
     if (ptr == nullptr)
     {
         CloseHandle(hMap);
@@ -157,10 +156,10 @@ auto create_or_open_and_map_file(const std::string& path, std::size_t size)
 auto open_and_map_file(const std::string& path)
     -> tl::expected<std::tuple<shm_handle, void*, std::size_t>, std::error_code>
 {
-    HANDLE hFile = CreateFileA(
-        path.c_str(), GENERIC_READ,
-        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
-        OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    HANDLE hFile =
+        CreateFileA(path.c_str(), GENERIC_READ,
+                    FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                    nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
     if (hFile == INVALID_HANDLE_VALUE)
     {
         if (GetLastError() == ERROR_FILE_NOT_FOUND)

@@ -50,9 +50,8 @@ struct shm_mapping
 /// @param name Name of the shared memory segment
 /// @param size Size of the shared memory segment in bytes (used when creating)
 /// @return An shm_mapping or an error
-auto create_or_open_and_map_shm(
-    const std::string& name, std::size_t size,
-    shm_backing backing = shm_backing::named)
+auto create_or_open_and_map_shm(const std::string& name, std::size_t size,
+                                shm_backing backing = shm_backing::named)
     -> tl::expected<shm_mapping, std::error_code>;
 
 /// Open and map an existing shared memory segment for reading (Windows

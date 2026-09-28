@@ -47,8 +47,7 @@ auto unique_file_path() -> std::filesystem::path
     const auto pid = static_cast<uint32_t>(::getpid());
 #endif
     return std::filesystem::temp_directory_path() /
-           ("ouroboros_file_" + std::to_string(pid) + "_" +
-            std::to_string(id));
+           ("ouroboros_file_" + std::to_string(pid) + "_" + std::to_string(id));
 }
 } // namespace
 
@@ -63,8 +62,8 @@ TEST(test_shm_file_backed, writer_and_reader)
                                                               chunk_count);
 
     rw_file_shm writer_shm = make_rw_file();
-    ASSERT_TRUE(
-        writer_shm.open_or_create(path_string, required_size, false).has_value());
+    ASSERT_TRUE(writer_shm.open_or_create(path_string, required_size, false)
+                    .has_value());
     EXPECT_TRUE(std::filesystem::exists(path));
     EXPECT_EQ(std::filesystem::file_size(path), required_size);
 
@@ -99,7 +98,8 @@ TEST(test_shm_file_backed, unlink_on_close)
 
     {
         rw_file_shm writer_shm = make_rw_file();
-        ASSERT_TRUE(writer_shm.open_or_create(path_string, 4096, true).has_value());
+        ASSERT_TRUE(
+            writer_shm.open_or_create(path_string, 4096, true).has_value());
         EXPECT_TRUE(std::filesystem::exists(path));
     }
 
