@@ -48,8 +48,7 @@ auto file_size(HANDLE hFile) -> tl::expected<std::size_t, std::error_code>
     return static_cast<std::size_t>(existing.QuadPart);
 }
 
-auto mapped_region_size(void* ptr)
-    -> tl::expected<std::size_t, std::error_code>
+auto mapped_region_size(void* ptr) -> tl::expected<std::size_t, std::error_code>
 {
     MEMORY_BASIC_INFORMATION mbi;
     if (VirtualQuery(ptr, &mbi, sizeof(mbi)) == 0)
@@ -60,13 +59,13 @@ auto mapped_region_size(void* ptr)
     return static_cast<std::size_t>(mbi.RegionSize);
 }
 
-auto open_existing_file(const std::string& path, DWORD access)
-    -> tl::expected<HANDLE, std::error_code>
+auto open_existing_file(const std::string& path,
+                        DWORD access) -> tl::expected<HANDLE, std::error_code>
 {
-    HANDLE hFile = CreateFileA(
-        path.c_str(), access,
-        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
-        OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    HANDLE hFile =
+        CreateFileA(path.c_str(), access,
+                    FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                    nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
     if (hFile == INVALID_HANDLE_VALUE)
     {
         if (GetLastError() == ERROR_FILE_NOT_FOUND)
@@ -144,8 +143,7 @@ auto create_or_open_and_map_file(const std::string& path, std::size_t size)
             make_error_code(ouroboros::error::shared_memory_create_failed));
     }
 
-    auto existing_file =
-        open_existing_file(path, GENERIC_READ | GENERIC_WRITE);
+    auto existing_file = open_existing_file(path, GENERIC_READ | GENERIC_WRITE);
     if (!existing_file)
     {
         return tl::make_unexpected(existing_file.error());

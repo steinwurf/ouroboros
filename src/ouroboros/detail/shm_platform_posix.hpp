@@ -105,10 +105,9 @@ inline void unlink_shm_name(shm_backing backing, const std::string& name)
 ///             `backing` is `shm_backing::file`
 /// @param size Size of the shared memory segment in bytes (used when creating)
 /// @return An shm_mapping or an error
-inline auto create_or_open_and_map_shm(shm_backing backing,
-                                       const std::string& name,
-                                       std::size_t size)
-    -> tl::expected<shm_mapping, std::error_code>
+inline auto create_or_open_and_map_shm(
+    shm_backing backing, const std::string& name,
+    std::size_t size) -> tl::expected<shm_mapping, std::error_code>
 {
     // Try to exclusively create the shared memory object
     int fd = open_shm_fd(backing, name, O_CREAT | O_RDWR | O_EXCL, 0666);
