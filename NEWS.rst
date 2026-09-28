@@ -6,8 +6,9 @@ every change, see the Git log.
 
 Latest
 ------
-* Major: Added file-backed shared memory. ``shm_file`` and the platform
-  map/unlink helpers now take an explicit ``shm_backing``.
+* Major: Added file-backed shared memory. ``shm_file::open`` /
+  ``open_or_create`` and the platform map/unlink helpers take an explicit
+  ``shm_backing`` as their first argument.
 * Minor: Added ``--file`` to ``shm_generator`` and ``shm_dumper`` to create
   and read file-backed shared-memory mappings.
 

@@ -218,9 +218,9 @@ auto main(int argc, char* argv[]) -> int
     const std::size_t required_size =
         ouroboros::detail::buffer_format::compute_buffer_size(chunk_target_size,
                                                               chunk_count);
-    ouroboros::shm_file<ouroboros::shm_access::read_write> shm_file(g_backing);
-    auto shm_result =
-        shm_file.open_or_create(target, required_size, unlink_at_exit);
+    ouroboros::shm_file<ouroboros::shm_access::read_write> shm_file;
+    auto shm_result = shm_file.open_or_create(g_backing, target, required_size,
+                                              unlink_at_exit);
     if (!shm_result.has_value())
     {
         std::cerr << "Error: Failed to open/create "

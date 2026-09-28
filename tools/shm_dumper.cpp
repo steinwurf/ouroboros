@@ -199,7 +199,7 @@ auto main(int argc, char* argv[]) -> int
     std::vector<uint8_t> file_buffer;
     const auto backing = file_path.empty() ? ouroboros::shm_backing::named
                                            : ouroboros::shm_backing::file;
-    ouroboros::shm_file<ouroboros::shm_access::read_only> shm_file(backing);
+    ouroboros::shm_file<ouroboros::shm_access::read_only> shm_file;
 
     const uint8_t* data_ptr = nullptr;
     std::size_t data_size = -1;
@@ -229,7 +229,7 @@ auto main(int argc, char* argv[]) -> int
     else
     {
         const std::string& target = file_path.empty() ? shm_name : file_path;
-        auto shm_result = shm_file.open(target);
+        auto shm_result = shm_file.open(backing, target);
         if (!shm_result.has_value())
         {
             std::cerr << "Error: Failed to open "
