@@ -24,6 +24,7 @@
 
 #include <cstdint>
 #include <string>
+#include <tuple>
 
 #include "../error_code.hpp"
 #include "shm_platform_windows.hpp"
@@ -34,6 +35,52 @@ inline namespace STEINWURF_OUROBOROS_VERSION
 {
 namespace detail
 {
+namespace
+{
+auto file_size(HANDLE hFile) -> tl::expected<std::size_t, std::error_code>
+{
+    LARGE_INTEGER existing;
+    if (!GetFileSizeEx(hFile, &existing))
+    {
+        return tl::make_unexpected(
+            make_error_code(ouroboros::error::shared_memory_stat_failed));
+    }
+    return static_cast<std::size_t>(existing.QuadPart);
+}
+
+auto mapped_region_size(void* ptr)
+    -> tl::expected<std::size_t, std::error_code>
+{
+    MEMORY_BASIC_INFORMATION mbi;
+    if (VirtualQuery(ptr, &mbi, sizeof(mbi)) == 0)
+    {
+        return tl::make_unexpected(
+            make_error_code(ouroboros::error::shared_memory_stat_failed));
+    }
+    return static_cast<std::size_t>(mbi.RegionSize);
+}
+
+auto open_existing_file(const std::string& path, DWORD access)
+    -> tl::expected<HANDLE, std::error_code>
+{
+    HANDLE hFile = CreateFileA(
+        path.c_str(), access,
+        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
+        OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (hFile == INVALID_HANDLE_VALUE)
+    {
+        if (GetLastError() == ERROR_FILE_NOT_FOUND)
+        {
+            return tl::make_unexpected(
+                make_error_code(ouroboros::error::shared_memory_not_found));
+        }
+        return tl::make_unexpected(
+            make_error_code(ouroboros::error::shared_memory_open_failed));
+    }
+    return hFile;
+}
+
+} // namespace
 
 bool shm_handle::is_valid() const
 {
@@ -49,9 +96,9 @@ auto create_or_open_and_map_file(const std::string& path, std::size_t size)
                     nullptr, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, nullptr);
     if (hFile != INVALID_HANDLE_VALUE)
     {
-        LARGE_INTEGER file_size;
-        file_size.QuadPart = static_cast<LONGLONG>(size);
-        if (!SetFilePointerEx(hFile, file_size, nullptr, FILE_BEGIN) ||
+        LARGE_INTEGER truncate_size;
+        truncate_size.QuadPart = static_cast<LONGLONG>(size);
+        if (!SetFilePointerEx(hFile, truncate_size, nullptr, FILE_BEGIN) ||
             !SetEndOfFile(hFile))
         {
             CloseHandle(hFile);
@@ -97,31 +144,21 @@ auto create_or_open_and_map_file(const std::string& path, std::size_t size)
             make_error_code(ouroboros::error::shared_memory_create_failed));
     }
 
-    hFile = CreateFileA(path.c_str(), GENERIC_READ | GENERIC_WRITE,
-                        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
-                        nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
-    if (hFile == INVALID_HANDLE_VALUE)
+    auto existing_file =
+        open_existing_file(path, GENERIC_READ | GENERIC_WRITE);
+    if (!existing_file)
     {
-        if (GetLastError() == ERROR_FILE_NOT_FOUND)
-        {
-            return tl::make_unexpected(
-                make_error_code(ouroboros::error::shared_memory_not_found));
-        }
-        return tl::make_unexpected(
-            make_error_code(ouroboros::error::shared_memory_open_failed));
+        return tl::make_unexpected(existing_file.error());
     }
+    hFile = *existing_file;
 
-    LARGE_INTEGER existing;
-    if (!GetFileSizeEx(hFile, &existing))
+    auto existing_size = file_size(hFile);
+    if (!existing_size)
     {
         CloseHandle(hFile);
-        return tl::make_unexpected(
-            make_error_code(ouroboros::error::shared_memory_stat_failed));
+        return tl::make_unexpected(existing_size.error());
     }
-
-    const std::size_t existing_size =
-        static_cast<std::size_t>(existing.QuadPart);
-    if (existing_size != size)
+    if (*existing_size != size)
     {
         CloseHandle(hFile);
         return tl::make_unexpected(
@@ -137,7 +174,7 @@ auto create_or_open_and_map_file(const std::string& path, std::size_t size)
             make_error_code(ouroboros::error::shared_memory_open_failed));
     }
 
-    void* ptr = MapViewOfFile(hMap, FILE_MAP_ALL_ACCESS, 0, 0, existing_size);
+    void* ptr = MapViewOfFile(hMap, FILE_MAP_ALL_ACCESS, 0, 0, *existing_size);
     if (ptr == nullptr)
     {
         CloseHandle(hMap);
@@ -150,47 +187,35 @@ auto create_or_open_and_map_file(const std::string& path, std::size_t size)
 
     shm_handle handle;
     handle.handle = reinterpret_cast<void*>(hMap);
-    return shm_mapping{handle, ptr, existing_size, false};
+    return shm_mapping{handle, ptr, *existing_size, false};
 }
 
 auto open_and_map_file(const std::string& path)
     -> tl::expected<std::tuple<shm_handle, void*, std::size_t>, std::error_code>
 {
-    HANDLE hFile =
-        CreateFileA(path.c_str(), GENERIC_READ,
-                    FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
-                    nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
-    if (hFile == INVALID_HANDLE_VALUE)
+    auto hFile = open_existing_file(path, GENERIC_READ);
+    if (!hFile)
     {
-        if (GetLastError() == ERROR_FILE_NOT_FOUND)
-        {
-            return tl::make_unexpected(
-                make_error_code(ouroboros::error::shared_memory_not_found));
-        }
-        return tl::make_unexpected(
-            make_error_code(ouroboros::error::shared_memory_open_failed));
+        return tl::make_unexpected(hFile.error());
     }
 
-    LARGE_INTEGER existing;
-    if (!GetFileSizeEx(hFile, &existing))
+    auto size = file_size(*hFile);
+    if (!size)
     {
-        CloseHandle(hFile);
-        return tl::make_unexpected(
-            make_error_code(ouroboros::error::shared_memory_stat_failed));
+        CloseHandle(*hFile);
+        return tl::make_unexpected(size.error());
     }
-
-    const std::size_t size = static_cast<std::size_t>(existing.QuadPart);
 
     HANDLE hMap =
-        CreateFileMappingA(hFile, nullptr, PAGE_READONLY, 0, 0, nullptr);
-    CloseHandle(hFile);
+        CreateFileMappingA(*hFile, nullptr, PAGE_READONLY, 0, 0, nullptr);
+    CloseHandle(*hFile);
     if (hMap == nullptr)
     {
         return tl::make_unexpected(
             make_error_code(ouroboros::error::shared_memory_open_failed));
     }
 
-    void* ptr = MapViewOfFile(hMap, FILE_MAP_READ, 0, 0, size);
+    void* ptr = MapViewOfFile(hMap, FILE_MAP_READ, 0, 0, *size);
     if (ptr == nullptr)
     {
         CloseHandle(hMap);
@@ -200,11 +225,11 @@ auto open_and_map_file(const std::string& path)
 
     shm_handle handle;
     handle.handle = reinterpret_cast<void*>(hMap);
-    return std::make_tuple(handle, ptr, size);
+    return std::make_tuple(handle, ptr, *size);
 }
 
-auto create_or_open_and_map_shm(const std::string& name, std::size_t size,
-                                shm_backing backing)
+auto create_or_open_and_map_shm(shm_backing backing, const std::string& name,
+                                std::size_t size)
     -> tl::expected<shm_mapping, std::error_code>
 {
     if (backing == shm_backing::file)
@@ -212,7 +237,6 @@ auto create_or_open_and_map_shm(const std::string& name, std::size_t size,
         return create_or_open_and_map_file(name, size);
     }
 
-    // Try to create a new file mapping
     HANDLE hMap =
         CreateFileMappingA(INVALID_HANDLE_VALUE, nullptr, PAGE_READWRITE, 0,
                            static_cast<DWORD>(size), name.c_str());
@@ -222,9 +246,7 @@ auto create_or_open_and_map_shm(const std::string& name, std::size_t size,
             make_error_code(ouroboros::error::shared_memory_create_failed));
     }
 
-    const bool already_exists = (GetLastError() == ERROR_ALREADY_EXISTS);
-
-    if (already_exists)
+    if (GetLastError() == ERROR_ALREADY_EXISTS)
     {
         // Segment already exists - close the handle from CreateFileMapping
         // and re-open with OpenFileMapping to get the existing size
@@ -250,27 +272,22 @@ auto create_or_open_and_map_shm(const std::string& name, std::size_t size,
                 make_error_code(ouroboros::error::shared_memory_map_failed));
         }
 
-        MEMORY_BASIC_INFORMATION mbi;
-        if (VirtualQuery(ptr, &mbi, sizeof(mbi)) == 0)
+        auto existing_size = mapped_region_size(ptr);
+        if (!existing_size)
         {
             UnmapViewOfFile(ptr);
             CloseHandle(hMap);
-            return tl::make_unexpected(
-                make_error_code(ouroboros::error::shared_memory_stat_failed));
+            return tl::make_unexpected(existing_size.error());
         }
-
-        const std::size_t existing_size =
-            static_cast<std::size_t>(mbi.RegionSize);
 
         VERIFY(reinterpret_cast<uintptr_t>(ptr) % 8 == 0,
                "Mapped shared memory is not 8-byte aligned");
 
         shm_handle handle;
         handle.handle = reinterpret_cast<void*>(hMap);
-        return shm_mapping{handle, ptr, existing_size, false};
+        return shm_mapping{handle, ptr, *existing_size, false};
     }
 
-    // Newly created
     void* ptr = MapViewOfFile(hMap, FILE_MAP_ALL_ACCESS, 0, 0, size);
     if (ptr == nullptr)
     {
@@ -287,7 +304,7 @@ auto create_or_open_and_map_shm(const std::string& name, std::size_t size,
     return shm_mapping{handle, ptr, size, true};
 }
 
-auto open_and_map_shm(const std::string& name, shm_backing backing)
+auto open_and_map_shm(shm_backing backing, const std::string& name)
     -> tl::expected<std::tuple<shm_handle, void*, std::size_t>, std::error_code>
 {
     if (backing == shm_backing::file)
@@ -295,7 +312,6 @@ auto open_and_map_shm(const std::string& name, shm_backing backing)
         return open_and_map_file(name);
     }
 
-    // Windows uses OpenFileMapping
     HANDLE hMap = OpenFileMappingA(FILE_MAP_READ, FALSE, name.c_str());
     if (hMap == nullptr)
     {
@@ -308,7 +324,6 @@ auto open_and_map_shm(const std::string& name, shm_backing backing)
             make_error_code(ouroboros::error::shared_memory_open_failed));
     }
 
-    // Map the view first (size 0 maps the entire object)
     void* ptr = MapViewOfFile(hMap, FILE_MAP_READ, 0, 0, 0);
     if (ptr == nullptr)
     {
@@ -317,21 +332,17 @@ auto open_and_map_shm(const std::string& name, shm_backing backing)
             make_error_code(ouroboros::error::shared_memory_map_failed));
     }
 
-    // Query the mapped memory to get the size
-    MEMORY_BASIC_INFORMATION mbi;
-    if (VirtualQuery(ptr, &mbi, sizeof(mbi)) == 0)
+    auto size = mapped_region_size(ptr);
+    if (!size)
     {
         UnmapViewOfFile(ptr);
         CloseHandle(hMap);
-        return tl::make_unexpected(
-            make_error_code(ouroboros::error::shared_memory_stat_failed));
+        return tl::make_unexpected(size.error());
     }
-
-    const std::size_t size = static_cast<std::size_t>(mbi.RegionSize);
 
     shm_handle handle;
     handle.handle = reinterpret_cast<void*>(hMap);
-    return std::make_tuple(handle, ptr, size);
+    return std::make_tuple(handle, ptr, *size);
 }
 
 void unmap_shm(const shm_handle& handle, void* ptr, std::size_t size)
@@ -350,14 +361,13 @@ void unmap_shm(const shm_handle& handle, void* ptr, std::size_t size)
     }
 }
 
-void unlink_shm(const std::string& name, shm_backing backing)
+void unlink_shm(shm_backing backing, const std::string& name)
 {
     if (backing == shm_backing::file)
     {
         DeleteFileA(name.c_str());
         return;
     }
-    (void)name; // Named mappings are released by closing the last handle
 }
 
 } // namespace detail

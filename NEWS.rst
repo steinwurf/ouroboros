@@ -6,9 +6,8 @@ every change, see the Git log.
 
 Latest
 ------
-* Minor: Added file-backed shared memory. Pass ``shm_backing::file`` to the
-  ``shm_file`` constructor to map a regular filesystem file. Named shared
-  memory remains the default.
+* Major: Added file-backed shared memory. ``shm_file`` and the platform
+  map/unlink helpers now take an explicit ``shm_backing``.
 * Minor: Added ``--file`` to ``shm_generator`` and ``shm_dumper`` to create
   and read file-backed shared-memory mappings.
 

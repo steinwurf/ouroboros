@@ -118,7 +118,7 @@ void signal_handler(int signal)
         // Unlink shared memory immediately if it was configured
         if (g_writer_configured.load() && !g_shm_name.empty())
         {
-            ouroboros::unlink_shm(g_shm_name, g_backing);
+            ouroboros::unlink_shm(g_backing, g_shm_name);
         }
     }
 }

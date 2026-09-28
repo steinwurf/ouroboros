@@ -66,7 +66,7 @@ TEST(test_shm_threaded, single_writer_single_reader)
     constexpr std::size_t chunk_count = 4;
     auto shm_name = generate_shm_name();
 
-    rw_shm_file writer_shm;
+    rw_shm_file writer_shm{ouroboros::shm_backing::named};
     ouroboros::writer writer;
     auto writer_result = configure_writer(writer_shm, writer, shm_name,
                                           chunk_target_size, chunk_count);
@@ -85,7 +85,7 @@ TEST(test_shm_threaded, single_writer_single_reader)
     std::thread reader_thread(
         [&]()
         {
-            ro_shm_file reader_shm;
+            ro_shm_file reader_shm{ouroboros::shm_backing::named};
             ouroboros::reader reader;
 
             // Retry configuration until buffer is ready
@@ -163,7 +163,7 @@ TEST(test_shm_threaded, single_writer_multiple_readers)
     constexpr std::size_t chunk_count = 4;
     auto shm_name = generate_shm_name();
 
-    rw_shm_file writer_shm;
+    rw_shm_file writer_shm{ouroboros::shm_backing::named};
     ouroboros::writer writer;
     auto writer_result = configure_writer(writer_shm, writer, shm_name,
                                           chunk_target_size, chunk_count);
@@ -188,7 +188,7 @@ TEST(test_shm_threaded, single_writer_multiple_readers)
         reader_threads.emplace_back(
             [&, t]()
             {
-                ro_shm_file reader_shm;
+                ro_shm_file reader_shm{ouroboros::shm_backing::named};
                 ouroboros::reader reader;
 
                 // Retry configuration until buffer is ready
@@ -276,7 +276,7 @@ TEST(test_shm_threaded, multi_threaded_with_wraps)
     constexpr std::size_t chunk_count = 4;
     auto shm_name = generate_shm_name();
 
-    rw_shm_file writer_shm;
+    rw_shm_file writer_shm{ouroboros::shm_backing::named};
     ouroboros::writer writer;
     auto writer_result = configure_writer(writer_shm, writer, shm_name,
                                           chunk_target_size, chunk_count);
@@ -303,7 +303,7 @@ TEST(test_shm_threaded, multi_threaded_with_wraps)
         reader_threads.emplace_back(
             [&, t]()
             {
-                ro_shm_file reader_shm;
+                ro_shm_file reader_shm{ouroboros::shm_backing::named};
                 ouroboros::reader reader;
 
                 // Retry configuration until buffer is ready
@@ -429,7 +429,7 @@ TEST(test_shm_threaded, concurrent_readers_different_starting_points)
     constexpr std::size_t chunk_count = 4;
     auto shm_name = generate_shm_name();
 
-    rw_shm_file writer_shm;
+    rw_shm_file writer_shm{ouroboros::shm_backing::named};
     ouroboros::writer writer;
     auto writer_result = configure_writer(writer_shm, writer, shm_name,
                                           chunk_target_size, chunk_count);
@@ -459,7 +459,7 @@ TEST(test_shm_threaded, concurrent_readers_different_starting_points)
                 // Delay each reader by different amounts
                 std::this_thread::sleep_for(std::chrono::milliseconds(t * 50));
 
-                ro_shm_file reader_shm;
+                ro_shm_file reader_shm{ouroboros::shm_backing::named};
                 ouroboros::reader reader;
                 auto reader_result =
                     configure_reader(reader_shm, reader, shm_name);
@@ -524,7 +524,7 @@ TEST(test_shm_threaded,
     constexpr std::size_t chunk_count = 4;         // Small number of chunks
     auto shm_name = generate_shm_name();
 
-    rw_shm_file writer_shm;
+    rw_shm_file writer_shm{ouroboros::shm_backing::named};
     ouroboros::writer writer;
     auto writer_result = configure_writer(writer_shm, writer, shm_name,
                                           chunk_target_size, chunk_count);
@@ -564,7 +564,7 @@ TEST(test_shm_threaded,
                 std::this_thread::sleep_for(
                     std::chrono::milliseconds(start_delay_ms));
 
-                ro_shm_file reader_shm;
+                ro_shm_file reader_shm{ouroboros::shm_backing::named};
                 ouroboros::reader reader;
 
                 // Retry configuration until buffer is ready
@@ -737,7 +737,7 @@ TEST(test_shm_threaded, maximum_throughput)
     constexpr std::size_t chunk_count = 8;
     auto shm_name = generate_shm_name();
 
-    rw_shm_file writer_shm;
+    rw_shm_file writer_shm{ouroboros::shm_backing::named};
     ouroboros::writer writer;
     auto writer_result = configure_writer(writer_shm, writer, shm_name,
                                           chunk_target_size, chunk_count);
@@ -759,7 +759,7 @@ TEST(test_shm_threaded, maximum_throughput)
     std::thread reader_thread(
         [&]()
         {
-            ro_shm_file reader_shm;
+            ro_shm_file reader_shm{ouroboros::shm_backing::named};
             ouroboros::reader reader;
 
             // Retry configuration until buffer is ready

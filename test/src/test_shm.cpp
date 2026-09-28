@@ -68,7 +68,7 @@ TEST(test_shm, writer_configure)
     constexpr std::size_t chunk_count = 4;
     auto shm_name = generate_shm_name();
 
-    rw_shm_file writer_shm;
+    rw_shm_file writer_shm{ouroboros::shm_backing::named};
     ouroboros::writer writer;
     auto result = configure_writer(writer_shm, writer, shm_name,
                                    chunk_target_size, chunk_count);
@@ -90,7 +90,7 @@ TEST(test_shm, buffer_id)
     constexpr uint64_t test_buffer_id = 0xDEADBEEF12345678ULL;
     auto shm_name = generate_shm_name();
 
-    rw_shm_file writer_shm;
+    rw_shm_file writer_shm{ouroboros::shm_backing::named};
     ouroboros::writer writer;
     auto writer_result =
         configure_writer(writer_shm, writer, shm_name, chunk_target_size,
@@ -100,7 +100,7 @@ TEST(test_shm, buffer_id)
     EXPECT_EQ(writer.buffer_id(), test_buffer_id);
     writer.write("test entry");
 
-    ro_shm_file reader_shm;
+    ro_shm_file reader_shm{ouroboros::shm_backing::named};
     ouroboros::reader reader;
     auto reader_result = configure_reader(reader_shm, reader, shm_name);
     ASSERT_TRUE(reader_result.has_value());
@@ -111,7 +111,7 @@ TEST(test_shm, reader_configure_before_writer)
 {
     auto shm_name = generate_shm_name();
 
-    ro_shm_file reader_shm;
+    ro_shm_file reader_shm{ouroboros::shm_backing::named};
     ouroboros::reader reader;
     auto result = configure_reader(reader_shm, reader, shm_name);
     EXPECT_FALSE(result.has_value())
@@ -124,14 +124,14 @@ TEST(test_shm, writer_reader_basic)
     constexpr std::size_t chunk_count = 4;
     auto shm_name = generate_shm_name();
 
-    rw_shm_file writer_shm;
+    rw_shm_file writer_shm{ouroboros::shm_backing::named};
     ouroboros::writer writer;
     auto writer_result = configure_writer(writer_shm, writer, shm_name,
                                           chunk_target_size, chunk_count);
     ASSERT_TRUE(writer_result.has_value())
         << "Writer configuration failed: " << writer_result.error().message();
 
-    ro_shm_file reader_shm;
+    ro_shm_file reader_shm{ouroboros::shm_backing::named};
     ouroboros::reader reader;
     auto reader_result = configure_reader(reader_shm, reader, shm_name);
     ASSERT_TRUE(reader_result.has_value())
@@ -148,7 +148,7 @@ TEST(test_shm, write_single_entry)
     constexpr std::size_t chunk_count = 4;
     auto shm_name = generate_shm_name();
 
-    rw_shm_file writer_shm;
+    rw_shm_file writer_shm{ouroboros::shm_backing::named};
     ouroboros::writer writer;
     auto writer_result = configure_writer(writer_shm, writer, shm_name,
                                           chunk_target_size, chunk_count);
@@ -158,7 +158,7 @@ TEST(test_shm, write_single_entry)
     std::string test_entry = "Hello, World!";
     writer.write(test_entry);
 
-    ro_shm_file reader_shm;
+    ro_shm_file reader_shm{ouroboros::shm_backing::named};
     ouroboros::reader reader;
     auto reader_result = configure_reader(reader_shm, reader, shm_name);
     ASSERT_TRUE(reader_result.has_value())
@@ -179,7 +179,7 @@ TEST(test_shm, write_multiple_entries)
     constexpr std::size_t chunk_count = 4;
     auto shm_name = generate_shm_name();
 
-    rw_shm_file writer_shm;
+    rw_shm_file writer_shm{ouroboros::shm_backing::named};
     ouroboros::writer writer;
     auto writer_result = configure_writer(writer_shm, writer, shm_name,
                                           chunk_target_size, chunk_count);
@@ -194,7 +194,7 @@ TEST(test_shm, write_multiple_entries)
         writer.write(entry);
     }
 
-    ro_shm_file reader_shm;
+    ro_shm_file reader_shm{ouroboros::shm_backing::named};
     ouroboros::reader reader;
     auto reader_result = configure_reader(reader_shm, reader, shm_name);
     ASSERT_TRUE(reader_result.has_value());
@@ -217,7 +217,7 @@ TEST(test_shm, writer_finish_reader_reports_finished)
     constexpr std::size_t chunk_count = 4;
     auto shm_name = generate_shm_name();
 
-    rw_shm_file writer_shm;
+    rw_shm_file writer_shm{ouroboros::shm_backing::named};
     ouroboros::writer writer;
     auto writer_result =
         configure_writer(writer_shm, writer, shm_name, chunk_target_size,
@@ -228,7 +228,7 @@ TEST(test_shm, writer_finish_reader_reports_finished)
     writer.write("Entry 2");
     writer.finish();
 
-    ro_shm_file reader_shm;
+    ro_shm_file reader_shm{ouroboros::shm_backing::named};
     ouroboros::reader reader;
     auto reader_result = configure_reader(reader_shm, reader, shm_name);
     ASSERT_TRUE(reader_result.has_value());
@@ -252,10 +252,10 @@ TEST(test_shm, writer_finish_reader_reports_finished)
               ouroboros::make_error_code(ouroboros::error::writer_finished));
 
     writer_shm.unlink();
-    writer_shm = rw_shm_file{};
-    reader_shm = ro_shm_file{};
+    writer_shm = rw_shm_file{ouroboros::shm_backing::named};
+    reader_shm = ro_shm_file{ouroboros::shm_backing::named};
 
-    ro_shm_file reader2_shm;
+    ro_shm_file reader2_shm{ouroboros::shm_backing::named};
     ouroboros::reader reader2;
     auto attach_result = configure_reader(reader2_shm, reader2, shm_name);
     EXPECT_FALSE(attach_result.has_value());
@@ -267,13 +267,13 @@ TEST(test_shm, reader_empty_buffer_handling)
     constexpr std::size_t chunk_count = 4;
     auto shm_name = generate_shm_name();
 
-    rw_shm_file writer_shm;
+    rw_shm_file writer_shm{ouroboros::shm_backing::named};
     ouroboros::writer writer;
     auto writer_result = configure_writer(writer_shm, writer, shm_name,
                                           chunk_target_size, chunk_count);
     ASSERT_TRUE(writer_result.has_value());
 
-    ro_shm_file reader_shm;
+    ro_shm_file reader_shm{ouroboros::shm_backing::named};
     ouroboros::reader reader;
     auto reader_result = configure_reader(reader_shm, reader, shm_name);
     ASSERT_TRUE(reader_result.has_value());
@@ -291,7 +291,7 @@ TEST(test_shm, multiple_readers)
     constexpr std::size_t chunk_count = 4;
     auto shm_name = generate_shm_name();
 
-    rw_shm_file writer_shm;
+    rw_shm_file writer_shm{ouroboros::shm_backing::named};
     ouroboros::writer writer;
     auto writer_result = configure_writer(writer_shm, writer, shm_name,
                                           chunk_target_size, chunk_count);
@@ -304,12 +304,12 @@ TEST(test_shm, multiple_readers)
         writer.write(entry);
     }
 
-    ro_shm_file reader1_shm;
+    ro_shm_file reader1_shm{ouroboros::shm_backing::named};
     ouroboros::reader reader1;
     auto result1 = configure_reader(reader1_shm, reader1, shm_name);
     ASSERT_TRUE(result1.has_value());
 
-    ro_shm_file reader2_shm;
+    ro_shm_file reader2_shm{ouroboros::shm_backing::named};
     ouroboros::reader reader2;
     auto result2 = configure_reader(reader2_shm, reader2, shm_name);
     ASSERT_TRUE(result2.has_value());
@@ -333,13 +333,13 @@ TEST(test_shm, interleaved_operations)
     constexpr std::size_t chunk_count = 4;
     auto shm_name = generate_shm_name();
 
-    rw_shm_file writer_shm;
+    rw_shm_file writer_shm{ouroboros::shm_backing::named};
     ouroboros::writer writer;
     auto writer_result = configure_writer(writer_shm, writer, shm_name,
                                           chunk_target_size, chunk_count);
     ASSERT_TRUE(writer_result.has_value());
 
-    ro_shm_file reader_shm;
+    ro_shm_file reader_shm{ouroboros::shm_backing::named};
     ouroboros::reader reader;
     auto reader_result = configure_reader(reader_shm, reader, shm_name);
     ASSERT_TRUE(reader_result.has_value());
@@ -380,7 +380,7 @@ TEST(test_shm, wrap_behavior)
     constexpr std::size_t chunk_count = 2;
     auto shm_name = generate_shm_name();
 
-    rw_shm_file writer_shm;
+    rw_shm_file writer_shm{ouroboros::shm_backing::named};
     ouroboros::writer writer;
     auto writer_result = configure_writer(writer_shm, writer, shm_name,
                                           chunk_target_size, chunk_count);
@@ -392,7 +392,7 @@ TEST(test_shm, wrap_behavior)
         writer.write(entry);
     }
 
-    ro_shm_file reader_shm;
+    ro_shm_file reader_shm{ouroboros::shm_backing::named};
     ouroboros::reader reader;
     auto reader_result = configure_reader(reader_shm, reader, shm_name);
     ASSERT_TRUE(reader_result.has_value());
@@ -418,10 +418,10 @@ TEST(test_shm, reader_is_ready)
     constexpr std::size_t chunk_count = 4;
     auto shm_name = generate_shm_name();
 
-    ro_shm_file reader_shm;
+    ro_shm_file reader_shm{ouroboros::shm_backing::named};
     EXPECT_FALSE(reader_shm.is_mapped());
 
-    rw_shm_file writer_shm;
+    rw_shm_file writer_shm{ouroboros::shm_backing::named};
     ouroboros::writer writer;
     auto writer_result = configure_writer(writer_shm, writer, shm_name,
                                           chunk_target_size, chunk_count);
@@ -443,7 +443,7 @@ TEST(test_shm, move_semantics)
     constexpr std::size_t chunk_count = 4;
     auto shm_name = generate_shm_name();
 
-    rw_shm_file writer1_shm;
+    rw_shm_file writer1_shm{ouroboros::shm_backing::named};
     ouroboros::writer writer1;
     auto result1 = configure_writer(writer1_shm, writer1, shm_name,
                                     chunk_target_size, chunk_count);
@@ -459,7 +459,7 @@ TEST(test_shm, move_semantics)
     EXPECT_EQ(writer2_shm.name(), shm_name);
 
     {
-        ro_shm_file reader1_shm;
+        ro_shm_file reader1_shm{ouroboros::shm_backing::named};
         ouroboros::reader reader1;
         auto result_reader1 = configure_reader(reader1_shm, reader1, shm_name);
         ASSERT_TRUE(result_reader1.has_value());

@@ -73,8 +73,8 @@ inline auto try_reserve_backing_with_posix_fallocate(int fd,
 }
 
 /// Open a shared-memory object or a regular file, depending on `backing`.
-inline auto open_shm_fd(const std::string& name, int flags, mode_t mode,
-                        shm_backing backing) -> int
+inline auto open_shm_fd(shm_backing backing, const std::string& name, int flags,
+                        mode_t mode) -> int
 {
     if (backing == shm_backing::file)
     {
@@ -84,7 +84,7 @@ inline auto open_shm_fd(const std::string& name, int flags, mode_t mode,
 }
 
 /// Remove a shared-memory object or a regular file, depending on `backing`.
-inline void unlink_shm_name(const std::string& name, shm_backing backing)
+inline void unlink_shm_name(shm_backing backing, const std::string& name)
 {
     if (backing == shm_backing::file)
     {
@@ -100,18 +100,18 @@ inline void unlink_shm_name(const std::string& name, shm_backing backing)
 /// Tries to exclusively create the segment first. If it already exists,
 /// opens the existing segment with read-write access instead.
 ///
-/// @param name Name of the shared memory segment, or filesystem path when
+/// @param backing Named shared memory or a regular file
+/// @param name Shared-memory name, or filesystem path when
 ///             `backing` is `shm_backing::file`
 /// @param size Size of the shared memory segment in bytes (used when creating)
-/// @param backing Named shared memory or a regular file
 /// @return An shm_mapping or an error
-inline auto create_or_open_and_map_shm(const std::string& name,
-                                       std::size_t size,
-                                       shm_backing backing = shm_backing::named)
+inline auto create_or_open_and_map_shm(shm_backing backing,
+                                       const std::string& name,
+                                       std::size_t size)
     -> tl::expected<shm_mapping, std::error_code>
 {
     // Try to exclusively create the shared memory object
-    int fd = open_shm_fd(name, O_CREAT | O_RDWR | O_EXCL, 0666, backing);
+    int fd = open_shm_fd(backing, name, O_CREAT | O_RDWR | O_EXCL, 0666);
     if (fd != -1)
     {
         // Successfully created a new segment
@@ -119,7 +119,7 @@ inline auto create_or_open_and_map_shm(const std::string& name,
         {
             // Failed to truncate the shared memory segment
             close(fd);
-            unlink_shm_name(name, backing);
+            unlink_shm_name(backing, name);
             return tl::make_unexpected(make_error_code(
                 ouroboros::error::shared_memory_truncate_failed));
         }
@@ -138,7 +138,7 @@ inline auto create_or_open_and_map_shm(const std::string& name,
         {
             // Failed to map the shared memory segment
             close(fd);
-            unlink_shm_name(name, backing);
+            unlink_shm_name(backing, name);
             return tl::make_unexpected(
                 make_error_code(ouroboros::error::shared_memory_map_failed));
         }
@@ -150,7 +150,7 @@ inline auto create_or_open_and_map_shm(const std::string& name,
         {
             munmap(ptr, size);
             close(fd);
-            unlink_shm_name(name, backing);
+            unlink_shm_name(backing, name);
             return tl::make_unexpected(make_error_code(
                 ouroboros::error::shared_memory_backing_allocation_failed));
         }
@@ -168,7 +168,7 @@ inline auto create_or_open_and_map_shm(const std::string& name,
     }
 
     // Segment already exists - open it for read-write
-    fd = open_shm_fd(name, O_RDWR, 0666, backing);
+    fd = open_shm_fd(backing, name, O_RDWR, 0666);
     if (fd == -1)
     {
         if (errno == ENOENT)
@@ -218,16 +218,15 @@ inline auto create_or_open_and_map_shm(const std::string& name,
 /// Open and map an existing shared memory segment for reading (POSIX
 /// implementation)
 ///
-/// @param name Name of the shared memory segment, or filesystem path when
-///             `backing` is `shm_backing::file`
 /// @param backing Named shared memory or a regular file
+/// @param name Shared-memory name, or filesystem path when
+///             `backing` is `shm_backing::file`
 /// @return A tuple of (handle, mapped pointer, size) or an error
-inline auto open_and_map_shm(const std::string& name,
-                             shm_backing backing = shm_backing::named)
+inline auto open_and_map_shm(shm_backing backing, const std::string& name)
     -> tl::expected<std::tuple<shm_handle, void*, std::size_t>, std::error_code>
 {
     // Open existing shared memory object
-    int fd = open_shm_fd(name, O_RDONLY, 0, backing);
+    int fd = open_shm_fd(backing, name, O_RDONLY, 0);
     if (fd == -1)
     {
         if (errno == ENOENT)
@@ -285,13 +284,12 @@ inline void unmap_shm(const shm_handle& handle, void* ptr, std::size_t size)
 
 /// Unlink (remove) a shared memory segment (POSIX implementation)
 ///
-/// @param name Name of the shared memory segment, or filesystem path when
-///             `backing` is `shm_backing::file`
 /// @param backing Named shared memory or a regular file
-inline void unlink_shm(const std::string& name,
-                       shm_backing backing = shm_backing::named)
+/// @param name Shared-memory name, or filesystem path when
+///             `backing` is `shm_backing::file`
+inline void unlink_shm(shm_backing backing, const std::string& name)
 {
-    unlink_shm_name(name, backing);
+    unlink_shm_name(backing, name);
 }
 
 } // namespace detail

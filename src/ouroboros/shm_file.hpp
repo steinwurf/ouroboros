@@ -37,7 +37,7 @@ enum class shm_access
 /// object on cleanup.
 ///
 /// The constructor selects the storage:
-/// - `shm_backing::named` (default): a named shared-memory object
+/// - `shm_backing::named`: a named shared-memory object
 /// - `shm_backing::file`: a regular filesystem file mapped into the process
 template <shm_access Access>
 class shm_file
@@ -46,8 +46,7 @@ public:
     /// Construct an empty (unmapped) shared-memory file wrapper.
     ///
     /// @param backing Where the mapping is stored
-    explicit shm_file(shm_backing backing = shm_backing::named) :
-        m_backing(backing)
+    explicit shm_file(shm_backing backing) : m_backing(backing)
     {
     }
 
@@ -97,7 +96,7 @@ public:
     ///
     /// Any existing mapping owned by this object is released first.
     ///
-    /// @param name Shared-memory name
+    /// @param name Shared-memory name, or filesystem path for file backing
     /// @return Empty expected on success, or an error code on failure
     template <shm_access A = Access,
               typename std::enable_if_t<A == shm_access::read_only, int> = 0>
@@ -105,7 +104,7 @@ public:
     {
         cleanup();
 
-        auto result = open_and_map_shm(name, m_backing);
+        auto result = open_and_map_shm(m_backing, name);
         if (!result)
         {
             return tl::make_unexpected(result.error());
@@ -123,7 +122,7 @@ public:
     ///
     /// Any existing mapping owned by this object is released first.
     ///
-    /// @param name Shared-memory name
+    /// @param name Shared-memory name, or filesystem path for file backing
     /// @param size Requested size when creating a new object
     /// @param should_unlink If true, unlink on cleanup/destruction
     /// @return Empty expected on success, or an error code on failure
@@ -135,7 +134,7 @@ public:
     {
         cleanup();
 
-        auto result = create_or_open_and_map_shm(name, size, m_backing);
+        auto result = create_or_open_and_map_shm(m_backing, name, size);
         if (!result)
         {
             return tl::make_unexpected(result.error());
@@ -200,7 +199,7 @@ public:
     {
         if (!m_name.empty())
         {
-            unlink_shm(m_name, m_backing);
+            unlink_shm(m_backing, m_name);
             m_should_unlink = false;
         }
     }
@@ -216,7 +215,7 @@ private:
         }
         if (m_should_unlink && !m_name.empty())
         {
-            unlink_shm(m_name, m_backing);
+            unlink_shm(m_backing, m_name);
         }
         m_name.clear();
         m_size = 0;
@@ -229,7 +228,7 @@ private:
     void* m_ptr = nullptr;
     std::size_t m_size = 0;
     bool m_should_unlink = false;
-    shm_backing m_backing = shm_backing::named;
+    shm_backing m_backing;
 };
 
 } // namespace STEINWURF_OUROBOROS_VERSION
