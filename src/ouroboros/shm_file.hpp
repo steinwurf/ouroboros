@@ -35,6 +35,10 @@ enum class shm_access
 /// The object owns the mapping and unmaps it on destruction or reassignment.
 /// Optionally, a read-write instance can also unlink the backing shared-memory
 /// object on cleanup.
+///
+/// Storage is selected when opening (first argument):
+/// - `shm_backing::named`: a named shared-memory object
+/// - `shm_backing::file`: a regular filesystem file mapped into the process
 template <shm_access Access>
 class shm_file
 {
@@ -52,7 +56,7 @@ public:
     shm_file(shm_file&& other) noexcept :
         m_name(std::move(other.m_name)), m_handle(other.m_handle),
         m_ptr(other.m_ptr), m_size(other.m_size),
-        m_should_unlink(other.m_should_unlink)
+        m_should_unlink(other.m_should_unlink), m_backing(other.m_backing)
     {
         other.m_handle = shm_handle{};
         other.m_ptr = nullptr;
@@ -71,6 +75,7 @@ public:
             m_ptr = other.m_ptr;
             m_size = other.m_size;
             m_should_unlink = other.m_should_unlink;
+            m_backing = other.m_backing;
 
             other.m_handle = shm_handle{};
             other.m_ptr = nullptr;
@@ -87,15 +92,17 @@ public:
     ///
     /// Any existing mapping owned by this object is released first.
     ///
-    /// @param name Shared-memory name
+    /// @param backing Named shared memory or a regular file
+    /// @param name Shared-memory name, or filesystem path for file backing
     /// @return Empty expected on success, or an error code on failure
     template <shm_access A = Access,
               typename std::enable_if_t<A == shm_access::read_only, int> = 0>
-    auto open(const std::string& name) -> tl::expected<void, std::error_code>
+    auto open(shm_backing backing,
+              const std::string& name) -> tl::expected<void, std::error_code>
     {
         cleanup();
 
-        auto result = open_and_map_shm(name);
+        auto result = open_and_map_shm(backing, name);
         if (!result)
         {
             return tl::make_unexpected(result.error());
@@ -106,6 +113,7 @@ public:
         m_ptr = std::get<1>(result.value());
         m_size = std::get<2>(result.value());
         m_should_unlink = false;
+        m_backing = backing;
         return {};
     }
 
@@ -113,19 +121,20 @@ public:
     ///
     /// Any existing mapping owned by this object is released first.
     ///
-    /// @param name Shared-memory name
+    /// @param backing Named shared memory or a regular file
+    /// @param name Shared-memory name, or filesystem path for file backing
     /// @param size Requested size when creating a new object
     /// @param should_unlink If true, unlink on cleanup/destruction
     /// @return Empty expected on success, or an error code on failure
     template <shm_access A = Access,
               typename std::enable_if_t<A == shm_access::read_write, int> = 0>
-    auto open_or_create(const std::string& name, std::size_t size,
-                        bool should_unlink = true)
+    auto open_or_create(shm_backing backing, const std::string& name,
+                        std::size_t size, bool should_unlink = true)
         -> tl::expected<void, std::error_code>
     {
         cleanup();
 
-        auto result = create_or_open_and_map_shm(name, size);
+        auto result = create_or_open_and_map_shm(backing, name, size);
         if (!result)
         {
             return tl::make_unexpected(result.error());
@@ -136,6 +145,7 @@ public:
         m_ptr = result->ptr;
         m_size = result->size;
         m_should_unlink = should_unlink;
+        m_backing = backing;
         return {};
     }
 
@@ -190,7 +200,7 @@ public:
     {
         if (!m_name.empty())
         {
-            unlink_shm(m_name);
+            unlink_shm(m_backing, m_name);
             m_should_unlink = false;
         }
     }
@@ -206,7 +216,7 @@ private:
         }
         if (m_should_unlink && !m_name.empty())
         {
-            unlink_shm(m_name);
+            unlink_shm(m_backing, m_name);
         }
         m_name.clear();
         m_size = 0;
@@ -219,6 +229,7 @@ private:
     void* m_ptr = nullptr;
     std::size_t m_size = 0;
     bool m_should_unlink = false;
+    shm_backing m_backing = shm_backing::named;
 };
 
 } // namespace STEINWURF_OUROBOROS_VERSION

@@ -22,6 +22,7 @@ inline namespace STEINWURF_OUROBOROS_VERSION
 // Expose detail types and functions in the main namespace
 using detail::create_or_open_and_map_shm;
 using detail::open_and_map_shm;
+using detail::shm_backing;
 using detail::shm_handle;
 using detail::shm_mapping;
 using detail::unlink_shm;

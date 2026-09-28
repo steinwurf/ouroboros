@@ -15,6 +15,7 @@
 #include <string>
 
 #include "../error_code.hpp"
+#include "shm_backing.hpp"
 
 namespace ouroboros
 {
@@ -46,18 +47,23 @@ struct shm_mapping
 /// Tries to exclusively create the segment first. If it already exists,
 /// opens the existing segment with read-write access instead.
 ///
-/// @param name Name of the shared memory segment
+/// @param backing Named shared memory or a regular file
+/// @param name Shared-memory name, or filesystem path when
+///             `backing` is `shm_backing::file`
 /// @param size Size of the shared memory segment in bytes (used when creating)
 /// @return An shm_mapping or an error
-auto create_or_open_and_map_shm(const std::string& name, std::size_t size)
+auto create_or_open_and_map_shm(shm_backing backing, const std::string& name,
+                                std::size_t size)
     -> tl::expected<shm_mapping, std::error_code>;
 
 /// Open and map an existing shared memory segment for reading (Windows
 /// implementation)
 ///
-/// @param name Name of the shared memory segment
+/// @param backing Named shared memory or a regular file
+/// @param name Shared-memory name, or filesystem path when
+///             `backing` is `shm_backing::file`
 /// @return A tuple of (handle, mapped pointer, size) or an error
-auto open_and_map_shm(const std::string& name)
+auto open_and_map_shm(shm_backing backing, const std::string& name)
     -> tl::expected<std::tuple<shm_handle, void*, std::size_t>,
                     std::error_code>;
 
@@ -70,10 +76,11 @@ void unmap_shm(const shm_handle& handle, void* ptr, std::size_t size);
 
 /// Unlink (remove) a shared memory segment (Windows implementation)
 ///
-/// @param name Name of the shared memory segment
-/// Note: Windows doesn't have unlink, but we can close the handle
-/// This is a no-op here as unlinking is handled by closing the handle
-void unlink_shm(const std::string& name);
+/// @param backing Named shared memory or a regular file
+/// @param name Shared-memory name, or filesystem path when
+///             `backing` is `shm_backing::file`
+/// Note: Windows named mappings have no unlink; file-backed deletes the file.
+void unlink_shm(shm_backing backing, const std::string& name);
 
 } // namespace detail
 }

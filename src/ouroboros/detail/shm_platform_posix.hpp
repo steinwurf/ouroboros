@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <cerrno>
 #include <cstdint>
 #include <fcntl.h>
 #include <string>
@@ -15,6 +16,7 @@
 #include <verify/verify.hpp>
 
 #include "../error_code.hpp"
+#include "shm_backing.hpp"
 
 namespace ouroboros
 {
@@ -70,21 +72,45 @@ inline auto try_reserve_backing_with_posix_fallocate(int fd,
 #endif
 }
 
+/// Open a shared-memory object or a regular file, depending on `backing`.
+inline auto open_shm_fd(shm_backing backing, const std::string& name, int flags,
+                        mode_t mode) -> int
+{
+    if (backing == shm_backing::file)
+    {
+        return ::open(name.c_str(), flags, mode);
+    }
+    return shm_open(name.c_str(), flags, mode);
+}
+
+/// Remove a shared-memory object or a regular file, depending on `backing`.
+inline void unlink_shm_name(shm_backing backing, const std::string& name)
+{
+    if (backing == shm_backing::file)
+    {
+        ::unlink(name.c_str());
+        return;
+    }
+    shm_unlink(name.c_str());
+}
+
 /// Create or open and map a shared memory segment for writing (POSIX
 /// implementation)
 ///
 /// Tries to exclusively create the segment first. If it already exists,
 /// opens the existing segment with read-write access instead.
 ///
-/// @param name Name of the shared memory segment
+/// @param backing Named shared memory or a regular file
+/// @param name Shared-memory name, or filesystem path when
+///             `backing` is `shm_backing::file`
 /// @param size Size of the shared memory segment in bytes (used when creating)
 /// @return An shm_mapping or an error
-inline auto create_or_open_and_map_shm(const std::string& name,
-                                       std::size_t size)
-    -> tl::expected<shm_mapping, std::error_code>
+inline auto create_or_open_and_map_shm(
+    shm_backing backing, const std::string& name,
+    std::size_t size) -> tl::expected<shm_mapping, std::error_code>
 {
     // Try to exclusively create the shared memory object
-    int fd = shm_open(name.c_str(), O_CREAT | O_RDWR | O_EXCL, 0666);
+    int fd = open_shm_fd(backing, name, O_CREAT | O_RDWR | O_EXCL, 0666);
     if (fd != -1)
     {
         // Successfully created a new segment
@@ -92,7 +118,7 @@ inline auto create_or_open_and_map_shm(const std::string& name,
         {
             // Failed to truncate the shared memory segment
             close(fd);
-            shm_unlink(name.c_str());
+            unlink_shm_name(backing, name);
             return tl::make_unexpected(make_error_code(
                 ouroboros::error::shared_memory_truncate_failed));
         }
@@ -111,7 +137,7 @@ inline auto create_or_open_and_map_shm(const std::string& name,
         {
             // Failed to map the shared memory segment
             close(fd);
-            shm_unlink(name.c_str());
+            unlink_shm_name(backing, name);
             return tl::make_unexpected(
                 make_error_code(ouroboros::error::shared_memory_map_failed));
         }
@@ -123,7 +149,7 @@ inline auto create_or_open_and_map_shm(const std::string& name,
         {
             munmap(ptr, size);
             close(fd);
-            shm_unlink(name.c_str());
+            unlink_shm_name(backing, name);
             return tl::make_unexpected(make_error_code(
                 ouroboros::error::shared_memory_backing_allocation_failed));
         }
@@ -141,7 +167,7 @@ inline auto create_or_open_and_map_shm(const std::string& name,
     }
 
     // Segment already exists - open it for read-write
-    fd = shm_open(name.c_str(), O_RDWR, 0666);
+    fd = open_shm_fd(backing, name, O_RDWR, 0666);
     if (fd == -1)
     {
         if (errno == ENOENT)
@@ -191,13 +217,15 @@ inline auto create_or_open_and_map_shm(const std::string& name,
 /// Open and map an existing shared memory segment for reading (POSIX
 /// implementation)
 ///
-/// @param name Name of the shared memory segment
+/// @param backing Named shared memory or a regular file
+/// @param name Shared-memory name, or filesystem path when
+///             `backing` is `shm_backing::file`
 /// @return A tuple of (handle, mapped pointer, size) or an error
-inline auto open_and_map_shm(const std::string& name)
+inline auto open_and_map_shm(shm_backing backing, const std::string& name)
     -> tl::expected<std::tuple<shm_handle, void*, std::size_t>, std::error_code>
 {
     // Open existing shared memory object
-    int fd = shm_open(name.c_str(), O_RDONLY, 0);
+    int fd = open_shm_fd(backing, name, O_RDONLY, 0);
     if (fd == -1)
     {
         if (errno == ENOENT)
@@ -255,10 +283,12 @@ inline void unmap_shm(const shm_handle& handle, void* ptr, std::size_t size)
 
 /// Unlink (remove) a shared memory segment (POSIX implementation)
 ///
-/// @param name Name of the shared memory segment
-inline void unlink_shm(const std::string& name)
+/// @param backing Named shared memory or a regular file
+/// @param name Shared-memory name, or filesystem path when
+///             `backing` is `shm_backing::file`
+inline void unlink_shm(shm_backing backing, const std::string& name)
 {
-    shm_unlink(name.c_str());
+    unlink_shm_name(backing, name);
 }
 
 } // namespace detail

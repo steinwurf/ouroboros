@@ -63,16 +63,25 @@ Or use shared memory for inter-process logging:
     ouroboros::writer writer;
     auto buffer_size =
         ouroboros::detail::buffer_format::compute_buffer_size(1024, 4);
-    writer_shm.open_or_create("/my_log", buffer_size);
+    writer_shm.open_or_create(ouroboros::shm_backing::named, "/my_log",
+                              buffer_size);
     writer.configure(std::span<uint8_t>(writer_shm.data(), writer_shm.size()), 1024, 4);
     writer.write("Process A says hello!");
 
     // Reader process (different process)
     ouroboros::shm_file<ouroboros::shm_access::read_only> reader_shm;
     ouroboros::reader reader;
-    reader_shm.open("/my_log");
+    reader_shm.open(ouroboros::shm_backing::named, "/my_log");
     reader.configure(std::span<const uint8_t>(reader_shm.data(), reader_shm.size()));
     auto entry = reader.read_next();
+
+The same API can map a regular file instead of a named shared-memory object:
+
+.. code-block:: cpp
+
+    ouroboros::shm_file<ouroboros::shm_access::read_write> writer_shm;
+    writer_shm.open_or_create(ouroboros::shm_backing::file, "/tmp/my_log.bin",
+                              buffer_size, false);
 
 Building 🏗️
 -----------
